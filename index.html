@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CFD — Circular Fashion Digital | Hệ Sinh Thái Thời Trang Tuần Hoàn & AI</title>
+  <meta name="description" content="PoC Demo Website - Công ty TNHH Circular Fashion Digital (CFD). Nền tảng thương mại điện tử thời trang tuần hoàn secondhand & upcycled tích hợp AI cá nhân hóa, kiểm định 3 lớp tại Làng Đại học ĐHQG-HCM." />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F3D2E'/%3E%3Cpath d='M16 32c0-7.5 6-12 11.5-12 4.5 0 7.5 3.5 10.5 8 3 4.5 6 8 10.5 8 5.5 0 11.5-4.5 11.5-12s-6-12-11.5-12c-4.5 0-7.5 3.5-10.5 8-3 4.5-6 8-10.5 8C22 28 16 24.5 16 32z' fill='none' stroke='%23D9F99D' stroke-width='3.5' transform='translate(-6 4) scale(1.05)'/%3E%3Ccircle cx='18' cy='32' r='3' fill='%2310B981'/%3E%3Ccircle cx='32' cy='32' r='3' fill='%23FFFFFF'/%3E%3Ccircle cx='46' cy='32' r='3' fill='%2310B981'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,500;1,6..72,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles/main.css" />
+</head>
+<body>
+  <!-- Academic / Startup PoC Banner -->
+  <div class="poc-top-bar">
+    <div class="container poc-bar-inner">
+      <div class="poc-bar-left">
+        <span class="poc-pill">POC DEMO v1.0</span>
+        <span class="poc-bar-text">Đề tài Khởi nghiệp (IM1021) • ĐH Bách khoa – ĐHQG TP.HCM • Lớp L04 – HK 252 • Nhóm 02</span>
+      </div>
+      <div class="poc-bar-right">
+        <span class="mono-badge">Pilot: Làng ĐH Thủ Đức – Dĩ An</span>
+        <button class="poc-jump-btn" data-nav="pitch">Xem Pitch &amp; Tài chính →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Primary Navigation -->
+  <header class="site-header" id="site-header">
+    <div class="container header-inner">
+      <a href="#market" class="brand-lockup" data-nav="market" aria-label="Trang chủ Circular Fashion Digital">
+        <span class="brand-logo" id="brand-logo-slot"></span>
+        <span class="brand-text">
+          <span class="brand-name">CFD</span>
+          <span class="brand-sub">Circular Fashion Digital</span>
+        </span>
+      </a>
+
+      <nav class="main-nav" aria-label="Điều hướng chính">
+        <button class="nav-link active" data-nav="market">
+          <span class="nav-dot"></span>Sàn Thời Trang
+        </button>
+        <button class="nav-link" data-nav="ai-stylist">
+          <span class="nav-dot"></span>AI Phối Đồ
+          <span class="nav-tag">Anti-Bias</span>
+        </button>
+        <button class="nav-link" data-nav="sell">
+          <span class="nav-dot"></span>Đăng Bán &amp; Ký Gửi
+        </button>
+        <button class="nav-link" data-nav="ecosystem">
+          <span class="nav-dot"></span>Trạm Xử Lý &amp; Tác Động
+        </button>
+        <button class="nav-link" data-nav="pitch">
+          <span class="nav-dot"></span>Mô Hình &amp; Tài Chính
+        </button>
+      </nav>
+
+      <div class="header-actions">
+        <button class="btn-outline-sm mobile-menu-toggle" id="mobile-menu-btn" aria-label="Mở menu">
+          ☰ Menu
+        </button>
+        <button class="cart-trigger" id="cart-open-btn" aria-label="Mở giỏ hàng">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          <span>Giỏ hàng</span>
+          <span class="cart-count" id="cart-count">0</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Drawer Menu -->
+    <div class="mobile-nav-panel" id="mobile-nav-panel">
+      <button class="nav-link active" data-nav="market">Sàn Thời Trang (Marketplace)</button>
+      <button class="nav-link" data-nav="ai-stylist">AI Phối Đồ &amp; Chống Định Kiến</button>
+      <button class="nav-link" data-nav="sell">Cổng Đăng Bán &amp; Ký Gửi</button>
+      <button class="nav-link" data-nav="ecosystem">Trạm Xử Lý 5 Phân Khu &amp; Tác Động</button>
+      <button class="nav-link" data-nav="pitch">Pitch Deck &amp; Tài Chính</button>
+    </div>
+  </header>
+
+  <!-- Main Dynamic Application Container -->
+  <main id="app-root" class="app-main"></main>
+
+  <!-- Product Detail & Digital Product Passport (DPP) Modal -->
+  <div class="modal-backdrop" id="product-modal" hidden>
+    <div class="modal-sheet modal-sheet-lg" role="dialog" aria-modal="true" aria-labelledby="modal-product-title">
+      <button class="modal-close" id="product-modal-close" aria-label="Đóng">✕</button>
+      <div id="product-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Shopping Cart & Escrow Checkout Drawer -->
+  <aside class="drawer-backdrop" id="cart-drawer" hidden>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-label="Giỏ hàng tuần hoàn">
+      <div class="drawer-header">
+        <div>
+          <h3>Giỏ hàng tuần hoàn</h3>
+          <p class="muted-xs">Bảo vệ giao dịch qua thanh toán trung gian CFD Escrow</p>
+        </div>
+        <button class="modal-close" id="cart-close-btn" aria-label="Đóng giỏ hàng">✕</button>
+      </div>
+      <div class="drawer-body" id="cart-items-container"></div>
+      <div class="drawer-footer" id="cart-footer"></div>
+    </div>
+  </aside>
+
+  <!-- Toast Notification -->
+  <div class="toast-region" id="toast-region" aria-live="polite"></div>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div class="footer-brand">
+        <div class="brand-lockup footer-lockup">
+          <span class="brand-logo" id="footer-logo-slot"></span>
+          <span class="brand-text">
+            <span class="brand-name">CFD</span>
+            <span class="brand-sub">Công ty TNHH Circular Fashion Digital</span>
+          </span>
+        </div>
+        <p class="footer-desc">
+          Hệ sinh thái thời trang tuần hoàn dựa trên dữ liệu và công nghệ AI. Kéo dài vòng đời trang phục,
+          chuẩn hóa kiểm định 3 lớp – 3 Không, và thúc đẩy tiêu dùng bền vững cho sinh viên &amp; Gen Z Việt Nam.
+        </p>
+        <div class="footer-badges">
+          <span class="mono-badge">AES-256 &amp; ISO 27001 Ready</span>
+          <span class="mono-badge">One-Way Flow 100m²</span>
+          <span class="mono-badge">Zero-Waste Protocol</span>
+        </div>
+      </div>
+
+      <div>
+        <h4>Hệ sinh thái CFD</h4>
+        <ul class="footer-links">
+          <li><button data-nav="market">Sàn Secondhand &amp; Upcycled</button></li>
+          <li><button data-nav="ai-stylist">AI Styling Assistant (Anti-Bias)</button></li>
+          <li><button data-nav="sell">Thu mua &amp; Ký gửi 60 ngày</button></li>
+          <li><button data-nav="ecosystem">Chuỗi cung ứng ngược 5 giai đoạn</button></li>
+          <li><button data-nav="pitch">Hồ sơ năng lực &amp; Dự báo tài chính</button></li>
+        </ul>
+      </div>
+
+      <div>
+        <h4>Thông tin liên hệ &amp; Học phần</h4>
+        <ul class="footer-meta">
+          <li><strong>Đơn vị:</strong> Trường ĐH Bách khoa – ĐHQG TP.HCM</li>
+          <li><strong>Học phần:</strong> Khởi nghiệp (IM1021) • Lớp L04 – HK 252</li>
+          <li><strong>Giảng viên hướng dẫn:</strong> Thầy Nguyễn Hữu Sơn</li>
+          <li><strong>Đại diện Nhóm 02:</strong> Đỗ Nguyễn Uyên Phương</li>
+          <li><strong>SĐT / Zalo:</strong> 0913 074 196</li>
+          <li><strong>Email:</strong> circularfashiondigital@hcmut.edu.vn</li>
+          <li><strong>Website mục tiêu:</strong> cfd.com.vn</li>
+        </ul>
+      </div>
+    </div>
+    <div class="container footer-bottom">
+      <span>© 2026 Công ty TNHH Circular Fashion Digital (CFD) — Nhóm 02 HCMUT. PoC Demo phục vụ nghiên cứu &amp; trình bày khởi nghiệp.</span>
+      <span class="mono-text">GATE 2 → MVP PILOT EDITION</span>
+    </div>
+  </footer>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
