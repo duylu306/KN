@@ -1,21 +1,16 @@
 import {
+  HERO_BANNER,
+  CATEGORY_TILES,
   PRODUCTS,
   BODY_SHAPES,
   STYLE_SPECTRUMS,
   DROPOFF_STATIONS,
-  WORKSHOP_ZONES,
-  FINANCIAL_BASELINE,
-  TEAM_MEMBERS,
+  POLICY_DOCS,
   INITIAL_SUBMISSIONS
 } from "./data.js";
-import {
-  renderBrandLogoSVG,
-  renderGarmentSVG,
-  renderVirtualTryOnSVG,
-  renderFloorplanSVG
-} from "./svg-art.js";
 
-const STORAGE_KEY = "cfd_poc_state_v1";
+const STORAGE_KEY = "cfd_store_v2";
+const FREE_SHIP_THRESHOLD = 299000;
 
 const state = {
   activeView: "market",
@@ -30,15 +25,13 @@ const state = {
   aiConfig: {
     bodyShape: "pear",
     style: "Streetwear",
-    budget: 500000,
-    occasion: "Đi học / Giảng đường",
+    budget: 520000,
+    occasion: "Đi học / Dạo phố",
     anchorId: ""
   },
-  aiScanTick: 0,
   sellForm: {
     itemName: "Áo Khoác Jean Oversize Vintage",
     category: "Áo khoác",
-    brand: "Zara / Local Brand",
     originalPrice: 550000,
     condition: "95",
     noStructuralDamage: true,
@@ -48,13 +41,9 @@ const state = {
     stationId: "ktx-b"
   },
   submissions: [...INITIAL_SUBMISSIONS],
-  activeZone: 1,
-  ecoItemsPerSemester: 6,
-  financeSim: {
-    users: 8200,
-    arpu: 100000
-  },
-  cart: ["CFD-UPC-001", "CFD-SEC-003"],
+  cart: ["CFD-UPC-001", "CFD-SEC-005"],
+  wishlist: ["CFD-SEC-003", "CFD-UPC-008"],
+  voucherCode: "",
   checkoutDoneOrder: null
 };
 
@@ -64,7 +53,9 @@ function loadState() {
     if (!raw) return;
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed.cart)) state.cart = parsed.cart;
+    if (Array.isArray(parsed.wishlist)) state.wishlist = parsed.wishlist;
     if (Array.isArray(parsed.submissions)) state.submissions = parsed.submissions;
+    if (typeof parsed.voucherCode === "string") state.voucherCode = parsed.voucherCode;
   } catch {
     // Ignore storage errors in private mode
   }
@@ -76,7 +67,9 @@ function saveState() {
       STORAGE_KEY,
       JSON.stringify({
         cart: state.cart,
-        submissions: state.submissions
+        wishlist: state.wishlist,
+        submissions: state.submissions,
+        voucherCode: state.voucherCode
       })
     );
   } catch {
@@ -97,13 +90,6 @@ function formatVND(amount) {
   return Number(amount).toLocaleString("vi-VN") + "đ";
 }
 
-function formatMillion(val) {
-  if (Math.abs(val) >= 1000) {
-    return (val / 1000).toFixed(2).replace(/\.00$/, "") + " tỷ VNĐ";
-  }
-  return Math.round(val).toLocaleString("vi-VN") + " triệu VNĐ";
-}
-
 function showToast(message) {
   const region = document.getElementById("toast-region");
   if (!region) return;
@@ -113,7 +99,7 @@ function showToast(message) {
   region.appendChild(el);
   setTimeout(() => {
     el.remove();
-  }, 3200);
+  }, 3000);
 }
 
 function getFilteredProducts() {
@@ -122,7 +108,7 @@ function getFilteredProducts() {
 
   let list = PRODUCTS.filter((p) => {
     if (q) {
-      const hay = `${p.name} ${p.category} ${p.style} ${p.fabric} ${p.id} ${p.origin}`.toLowerCase();
+      const hay = `${p.name} ${p.brand} ${p.category} ${p.style} ${p.fabric} ${p.id}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     if (tier !== "all" && p.tier !== tier) return false;
@@ -136,8 +122,8 @@ function getFilteredProducts() {
 
   if (sort === "price-asc") {
     list = [...list].sort((a, b) => a.price - b.price);
-  } else if (sort === "eco-desc") {
-    list = [...list].sort((a, b) => b.co2SavedKg - a.co2SavedKg);
+  } else if (sort === "price-desc") {
+    list = [...list].sort((a, b) => b.price - a.price);
   } else if (sort === "discount-desc") {
     list = [...list].sort(
       (a, b) => (b.originalPrice - b.price) / b.originalPrice - (a.originalPrice - a.price) / a.originalPrice
@@ -166,7 +152,6 @@ function generateAIOutfits(cfg) {
           const totalPrice = pieces.reduce((sum, p) => sum + p.price, 0);
           const totalOriginal = pieces.reduce((sum, p) => sum + p.originalPrice, 0);
 
-          // Score calculation based on PDF rule + data model
           let score = 70;
           const bodyMatches = pieces.filter((p) => p.bodyFit.includes(cfg.bodyShape)).length;
           score += (bodyMatches / pieces.length) * 16;
@@ -174,10 +159,10 @@ function generateAIOutfits(cfg) {
           const styleMatches = pieces.filter((p) => p.style === cfg.style).length;
           score += Math.min(10, styleMatches * 4.5);
 
-          if (cfg.occasion === "Thuyết trình / Phỏng vấn") {
-            if (pieces.some((p) => p.style === "Minimalist")) score += 5;
-          } else if (cfg.occasion === "Cà phê cuối tuần") {
-            if (pieces.some((p) => p.tier === "B")) score += 4;
+          if (cfg.occasion === "Đi làm / Thuyết trình" && pieces.some((p) => p.style === "Minimalist")) {
+            score += 5;
+          } else if (cfg.occasion === "Cuối tuần / Dạo phố" && pieces.some((p) => p.tier === "B")) {
+            score += 4;
           }
 
           if (totalPrice <= cfg.budget) {
@@ -188,9 +173,7 @@ function generateAIOutfits(cfg) {
 
           const finalScore = Math.max(68, Math.min(98, Math.round(score)));
           const baseSig = `${outer ? outer.id : "none"}-${top.id}-${bottom.id}`;
-
           const totalCo2 = pieces.reduce((s, p) => s + p.co2SavedKg, 0);
-          const totalWater = pieces.reduce((s, p) => s + p.waterSavedL, 0);
           const discountPct = Math.round(((totalOriginal - totalPrice) / totalOriginal) * 100);
 
           combos.push({
@@ -206,7 +189,6 @@ function generateAIOutfits(cfg) {
             totalOriginal,
             discountPct,
             totalCo2,
-            totalWater,
             withinBudget: totalPrice <= cfg.budget
           });
         }
@@ -225,13 +207,13 @@ function generateAIOutfits(cfg) {
   return topDistinct;
 }
 
-/* ==================== RENDERERS ==================== */
+/* ==================== STOREFRONT VIEW ==================== */
 
 function renderProductCardsHTML(products) {
   if (!products.length) {
     return `<div class="empty-state" style="grid-column: 1 / -1;">
-         <p><strong>Không tìm thấy sản phẩm khớp bộ lọc hiện tại.</strong></p>
-         <button class="btn-outline btn-sm" id="reset-filters-btn">Xóa bộ lọc để xem toàn bộ sản phẩm</button>
+         <p><strong>Không tìm thấy sản phẩm phù hợp với bộ lọc hiện tại.</strong></p>
+         <button class="btn-outline btn-sm" id="reset-filters-empty-btn">Xóa bộ lọc để xem toàn bộ sản phẩm</button>
        </div>`;
   }
 
@@ -239,36 +221,44 @@ function renderProductCardsHTML(products) {
     .map((p) => {
       const savePct = Math.round(((p.originalPrice - p.price) / p.originalPrice) * 100);
       const inCart = state.cart.includes(p.id);
+      const isSaved = state.wishlist.includes(p.id);
+      const badgeHtml =
+        p.tier === "B"
+          ? `<span class="card-tag upcycled">Upcycled</span>`
+          : `<span class="card-tag sale">-${savePct}%</span>`;
+
       return `
         <article class="product-card" data-product-id="${p.id}">
           <div class="product-media" data-open-product="${p.id}">
-            <span class="tier-badge ${p.tier === "A" ? "tier-a" : "tier-b"}">${p.tier === "A" ? "Nhóm A • Chuẩn 3-Không" : "Nhóm B • Upcycled 1-of-1"}</span>
-            <span class="qa-badge">✓ Đã hấp y tế</span>
-            ${renderGarmentSVG(p)}
-            <span class="eco-badge">-${p.co2SavedKg.toFixed(1)} kg CO₂</span>
+            <img src="${escapeHtml(p.image)}" alt="${escapeHtml(p.name)}" loading="lazy" />
+            ${badgeHtml}
+            <button
+              class="wishlist-toggle ${isSaved ? "active" : ""}"
+              data-toggle-wish="${p.id}"
+              aria-label="${isSaved ? "Bỏ yêu thích" : "Thêm vào yêu thích"}"
+              title="${isSaved ? "Đã lưu" : "Lưu yêu thích"}"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="${isSaved ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+            </button>
+            <button class="quick-add-bar" data-add-cart="${p.id}">
+              ${inCart ? "✓ Đã có trong giỏ hàng" : "+ Thêm nhanh vào giỏ"}
+            </button>
           </div>
-          <div class="product-body">
-            <div class="product-meta-line">
-              <span>${p.id}</span>
-              <span>${p.style} • Size ${p.size.split(" ")[0]}</span>
+          <div class="product-info">
+            <div class="product-meta-row">
+              <span>${escapeHtml(p.brand)}</span>
+              <span>Size ${escapeHtml(p.size.split(" ")[0])}</span>
             </div>
             <h3 class="product-title" data-open-product="${p.id}">${escapeHtml(p.name)}</h3>
-            <div class="product-specs">
-              <span class="spec-pill">${escapeHtml(p.silhouetteTag)}</span>
-              <span class="spec-pill">${escapeHtml(p.colorName)}</span>
-            </div>
             <div class="product-price-row">
               <span class="price-now">${formatVND(p.price)}</span>
               <span class="price-old">${formatVND(p.originalPrice)}</span>
-              <span class="price-save">-${savePct}%</span>
             </div>
-            <div class="product-actions">
-              <button class="btn-primary btn-sm" data-add-cart="${p.id}">
-                ${inCart ? "✓ Trong giỏ hàng" : "+ Thêm vào giỏ"}
-              </button>
-              <button class="btn-outline btn-sm" data-open-product="${p.id}" title="Xem Hộ Chiếu Sản Phẩm Số">
-                Hộ chiếu số
-              </button>
+            <div class="product-bottom-meta">
+              <span class="swatch-dots" title="${escapeHtml(p.colorName)}">
+                ${p.colors.map((c) => `<span class="swatch-dot" style="background:${c}"></span>`).join("")}
+              </span>
+              <span class="hygiene-note">✓ Đã giặt hấp</span>
             </div>
           </div>
         </article>
@@ -279,255 +269,306 @@ function renderProductCardsHTML(products) {
 
 function renderMarketplaceView() {
   const products = getFilteredProducts();
-  const spotlight = [PRODUCTS[0], PRODUCTS[1], PRODUCTS[3], PRODUCTS[4]];
   const f = state.filters;
   const cardsHtml = renderProductCardsHTML(products);
 
+  const tierOptions = [
+    ["all", "Tất cả sản phẩm"],
+    ["A", "Secondhand Tuyển Chọn"],
+    ["B", "Upcycled Độc Bản"]
+  ];
+  const categoryOptions = ["all", "Áo khoác", "Áo", "Quần & Váy", "Túi & Phụ kiện"];
+  const styleOptions = ["all", "Streetwear", "Minimalist", "Y2K Vintage", "Eco-Vintage"];
+  const priceOptions = [
+    ["all", "Tất cả mức giá"],
+    ["under150", "Dưới 150.000đ"],
+    ["150to250", "150.000đ – 250.000đ"],
+    ["above250", "Trên 250.000đ"]
+  ];
+
   return `
-    <section class="view-section container">
-      <!-- Hero Campaign -->
-      <div class="hero-card">
-        <div class="hero-content">
-          <div class="hero-eyebrow">
-            <span>DATA-DRIVEN CIRCULAR ECOSYSTEM • PILOT LÀNG ĐẠI HỌC TP.HCM</span>
-          </div>
-          <h1 class="hero-title">
-            Thời trang tuần hoàn thông minh — <em>Độc bản, sạch chuẩn y tế</em> &amp; phối đồ AI
-          </h1>
-          <p class="hero-lead">
-            Nền tảng kết nối <strong>Gen Z Trend Seeker</strong> và <strong>Minimalism Seller</strong>.
-            Mọi sản phẩm secondhand &amp; upcycled đều vượt qua quy trình kiểm định <strong>3 Không</strong>,
-            giặt hấp diệt khuẩn và số hóa Metadata minh bạch vòng đời.
-          </p>
-          <div class="hero-actions">
-            <button class="hero-btn-light" id="scroll-to-catalog-btn">Khám phá Sàn Ngay (${PRODUCTS.length} mẫu)</button>
-            <button class="hero-btn-ghost" data-nav="ai-stylist">Thử AI Phối Đồ Anti-Bias</button>
-            <button class="hero-btn-ghost" data-nav="sell">Bán / Ký gửi đồ cũ</button>
-          </div>
-          <div class="hero-trust-strip">
-            <div>
-              <div class="trust-stat-val">30% – 70%</div>
-              <div class="trust-stat-lbl">Rẻ hơn đồ mới cùng phân khúc</div>
-            </div>
-            <div>
-              <div class="trust-stat-val">3 Lớp QA</div>
-              <div class="trust-stat-lbl">Kiểm định 3-Không &amp; Hấp y tế</div>
-            </div>
-            <div>
-              <div class="trust-stat-val">100% Minh bạch</div>
-              <div class="trust-stat-lbl">Hộ chiếu số &amp; Tác động CO₂</div>
+    <section class="view-section">
+      <!-- Editorial Full-Bleed Fashion Hero -->
+      <div class="hero-banner">
+        <img class="hero-bg-img" src="${escapeHtml(HERO_BANNER.image)}" alt="Thời trang tuần hoàn tuyển chọn CFD" />
+        <div class="hero-scrim"></div>
+        <div class="container">
+          <div class="hero-inner">
+            <div class="hero-kicker">${HERO_BANNER.kicker}</div>
+            <h1 class="hero-title">${HERO_BANNER.title}</h1>
+            <p class="hero-subtitle">${HERO_BANNER.subtitle}</p>
+            <div class="hero-actions">
+              <button class="btn-hero-white" id="hero-shop-btn">Mua sắm ngay</button>
+              <button class="btn-hero-ghost" data-nav="ai-stylist">Phối đồ cùng AI</button>
             </div>
           </div>
         </div>
+      </div>
 
-        <div class="hero-visual-panel">
-          <div class="hero-visual-header">
-            <span class="live-pulse">STUDIO BOX • VỪA LÊN KỆ</span>
-            <span>TRẠM LÀNG ĐH</span>
+      <!-- 4-Column Commercial USP Strip -->
+      <div class="usp-strip">
+        <div class="container usp-grid">
+          <div class="usp-item">
+            <div class="usp-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg>
+            </div>
+            <div>
+              <div class="usp-title">Kiểm định 3-Không</div>
+              <div class="usp-desc">Không rách thủng, không xù ố</div>
+            </div>
           </div>
-          <div class="hero-spotlight-grid">
-            ${spotlight
-              .map(
-                (item) => `
-              <div class="spotlight-mini-card" data-open-product="${item.id}">
-                <div class="spotlight-mini-thumb">${renderGarmentSVG(item)}</div>
-                <div class="spotlight-mini-title">${escapeHtml(item.name)}</div>
-                <div class="spotlight-mini-meta">
-                  <strong style="color:var(--forest)">${formatVND(item.price)}</strong>
-                  <span style="color:var(--terracotta)">-${item.co2SavedKg}kg CO₂</span>
-                </div>
+          <div class="usp-item">
+            <div class="usp-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83"/></svg>
+            </div>
+            <div>
+              <div class="usp-title">Giặt hấp diệt khuẩn</div>
+              <div class="usp-desc">Sạch chuẩn y tế trước khi lên kệ</div>
+            </div>
+          </div>
+          <div class="usp-item">
+            <div class="usp-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+            </div>
+            <div>
+              <div class="usp-title">Bảo vệ thanh toán Escrow</div>
+              <div class="usp-desc">Đổi trả 7 ngày nếu sai mô tả</div>
+            </div>
+          </div>
+          <div class="usp-item">
+            <div class="usp-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 9h18v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9Z"/><path d="m3 9 2.45-4.9A2 2 0 0 1 7.24 3h9.52a2 2 0 0 1 1.8 1.1L21 9"/><path d="M12 3v6"/></svg>
+            </div>
+            <div>
+              <div class="usp-title">Freeship từ 299.000đ</div>
+              <div class="usp-desc">Đóng gói bằng bao bì sinh học</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4-Column Category Visual Strip -->
+      <div class="container section-block">
+        <div class="section-header-row">
+          <div>
+            <h2 class="section-heading">Danh mục nổi bật</h2>
+            <p class="section-lead">Chọn nhanh theo nhóm trang phục hoặc phong cách yêu thích</p>
+          </div>
+        </div>
+
+        <div class="category-grid">
+          ${CATEGORY_TILES.map(
+            (cat) => `
+            <button class="category-tile" data-cat-jump="${escapeHtml(cat.id)}">
+              <img src="${escapeHtml(cat.image)}" alt="${escapeHtml(cat.title)}" loading="lazy" />
+              <div class="category-tile-overlay">
+                <div class="category-tile-title">${escapeHtml(cat.title)}</div>
+                <div class="category-tile-sub">${escapeHtml(cat.subtitle)}</div>
               </div>
-            `
-              )
-              .join("")}
-          </div>
+            </button>
+          `
+          ).join("")}
         </div>
       </div>
 
-      <!-- Marketplace Catalog Section -->
-      <div class="section-head" id="catalog-anchor">
-        <div>
-          <div class="section-kicker">SÀN THƯƠNG MẠI TUẦN HOÀN</div>
-          <h2 class="section-title">Kho đồ Secondhand tuyển chọn &amp; Bộ sưu tập Upcycled</h2>
-          <p class="section-sub">Nhấn vào bất kỳ sản phẩm nào để xem <strong>Hộ chiếu Sản phẩm Số (Digital Product Passport)</strong>, thông số đo thực tế từ Studio và chứng nhận hấp diệt khuẩn.</p>
-        </div>
-        <div class="mono-text" id="market-count-label" style="font-size:13px; color:var(--ink-muted)">
-          Hiển thị <strong>${products.length}</strong> / ${PRODUCTS.length} sản phẩm
-        </div>
-      </div>
-
-      <!-- Filter Toolbar -->
-      <div class="filter-toolbar">
-        <div class="filter-row">
-          <div class="search-box">
-            <span class="search-icon">🔍</span>
-            <input
-              type="text"
-              id="market-search-input"
-              placeholder="Tìm theo tên món, chất liệu (denim, linen...), phong cách, mã SKU..."
-              value="${escapeHtml(f.search)}"
-            />
-          </div>
-          <select id="market-sort-select" class="select-control" aria-label="Sắp xếp sản phẩm">
-            <option value="featured" ${f.sort === "featured" ? "selected" : ""}>Sắp xếp: Đề xuất Studio</option>
-            <option value="price-asc" ${f.sort === "price-asc" ? "selected" : ""}>Giá: Thấp đến cao</option>
-            <option value="discount-desc" ${f.sort === "discount-desc" ? "selected" : ""}>Tiết kiệm % nhiều nhất</option>
-            <option value="eco-desc" ${f.sort === "eco-desc" ? "selected" : ""}>Giảm CO₂ cao nhất</option>
-          </select>
-        </div>
-
-        <div class="filter-row">
-          <div class="chip-group">
-            <span class="chip-label">Phân luồng:</span>
-            ${[
-              ["all", "Tất cả"],
-              ["A", "Nhóm A • Secondhand 3-Không"],
-              ["B", "Nhóm B • Upcycled Độc bản"]
-            ]
-              .map(
-                ([val, label]) =>
-                  `<button class="filter-chip ${f.tier === val ? "active" : ""}" data-filter-tier="${val}">${label}</button>`
-              )
-              .join("")}
-          </div>
-
-          <div class="chip-group">
-            <span class="chip-label">Danh mục:</span>
-            ${["all", "Áo khoác", "Áo", "Quần & Váy", "Túi & Phụ kiện"]
-              .map(
-                (cat) =>
-                  `<button class="filter-chip ${f.category === cat ? "active" : ""}" data-filter-cat="${cat}">${cat === "all" ? "Tất cả" : cat}</button>`
-              )
-              .join("")}
+      <!-- Storefront Catalog: Sidebar Filters + Product Grid -->
+      <div class="container section-block" id="catalog-anchor">
+        <div class="section-header-row">
+          <div>
+            <h2 class="section-heading">Sản phẩm đang mở bán</h2>
+            <p class="section-lead">Mỗi sản phẩm là duy nhất — được đo số đo thực tế và chụp ảnh trực tiếp tại Studio</p>
           </div>
         </div>
 
-        <div class="filter-row">
-          <div class="chip-group">
-            <span class="chip-label">Phổ phong cách:</span>
-            ${["all", "Streetwear", "Minimalist", "Y2K Vintage", "Eco-Vintage"]
-              .map(
-                (st) =>
-                  `<button class="filter-chip ${f.style === st ? "active" : ""}" data-filter-style="${st}">${st === "all" ? "Mọi phong cách" : st}</button>`
-              )
-              .join("")}
-          </div>
+        <!-- Mobile quick category pills -->
+        <div class="mobile-filter-pills">
+          ${categoryOptions
+            .map(
+              (cat) =>
+                `<button class="filter-pill ${f.category === cat ? "active" : ""}" data-filter-cat="${cat}">${cat === "all" ? "Tất cả" : cat}</button>`
+            )
+            .join("")}
+          ${tierOptions
+            .slice(1)
+            .map(
+              ([val, lbl]) =>
+                `<button class="filter-pill ${f.tier === val ? "active" : ""}" data-filter-tier="${val}">${lbl}</button>`
+            )
+            .join("")}
+        </div>
 
-          <div class="chip-group">
-            <span class="chip-label">Ngân sách:</span>
-            ${[
-              ["all", "Tất cả"],
-              ["under150", "< 150k"],
-              ["150to250", "150k – 250k"],
-              ["above250", "> 250k"]
-            ]
-              .map(
-                ([val, lbl]) =>
-                  `<button class="filter-chip ${f.priceRange === val ? "active" : ""}" data-filter-price="${val}">${lbl}</button>`
-              )
-              .join("")}
+        <div class="shop-layout">
+          <!-- Left Sticky Filter Sidebar -->
+          <aside class="filter-sidebar" aria-label="Bộ lọc sản phẩm">
+            <div class="filter-sidebar-head">
+              <h3>Bộ lọc</h3>
+              <button class="text-reset-btn" id="reset-filters-btn">Xóa tất cả</button>
+            </div>
+
+            <div class="filter-group">
+              <div class="filter-group-title">Phân loại</div>
+              <div class="filter-option-list">
+                ${tierOptions
+                  .map(
+                    ([val, label]) => `
+                  <button class="filter-list-btn ${f.tier === val ? "active" : ""}" data-filter-tier="${val}">
+                    <span>${label}</span>
+                  </button>`
+                  )
+                  .join("")}
+              </div>
+            </div>
+
+            <div class="filter-group">
+              <div class="filter-group-title">Danh mục</div>
+              <div class="filter-option-list">
+                ${categoryOptions
+                  .map(
+                    (cat) => `
+                  <button class="filter-list-btn ${f.category === cat ? "active" : ""}" data-filter-cat="${cat}">
+                    <span>${cat === "all" ? "Tất cả danh mục" : cat}</span>
+                  </button>`
+                  )
+                  .join("")}
+              </div>
+            </div>
+
+            <div class="filter-group">
+              <div class="filter-group-title">Phong cách</div>
+              <div class="filter-option-list">
+                ${styleOptions
+                  .map(
+                    (st) => `
+                  <button class="filter-list-btn ${f.style === st ? "active" : ""}" data-filter-style="${st}">
+                    <span>${st === "all" ? "Tất cả phong cách" : st}</span>
+                  </button>`
+                  )
+                  .join("")}
+              </div>
+            </div>
+
+            <div class="filter-group">
+              <div class="filter-group-title">Mức giá</div>
+              <div class="filter-option-list">
+                ${priceOptions
+                  .map(
+                    ([val, lbl]) => `
+                  <button class="filter-list-btn ${f.priceRange === val ? "active" : ""}" data-filter-price="${val}">
+                    <span>${lbl}</span>
+                  </button>`
+                  )
+                  .join("")}
+              </div>
+            </div>
+          </aside>
+
+          <!-- Main Product Area -->
+          <div>
+            <div class="catalog-toolbar">
+              <div class="catalog-search-inline">
+                <svg class="header-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input
+                  type="search"
+                  id="catalog-search-input"
+                  placeholder="Tìm tên sản phẩm, thương hiệu, chất liệu..."
+                  value="${escapeHtml(f.search)}"
+                />
+              </div>
+
+              <div class="catalog-toolbar-right">
+                <span class="muted-xs tabular" id="market-count-label" style="margin:0;">
+                  Hiển thị <strong>${products.length}</strong> / ${PRODUCTS.length} sản phẩm
+                </span>
+                <select id="market-sort-select" class="select-control" aria-label="Sắp xếp">
+                  <option value="featured" ${f.sort === "featured" ? "selected" : ""}>Sắp xếp: Nổi bật</option>
+                  <option value="price-asc" ${f.sort === "price-asc" ? "selected" : ""}>Giá: Thấp đến cao</option>
+                  <option value="price-desc" ${f.sort === "price-desc" ? "selected" : ""}>Giá: Cao đến thấp</option>
+                  <option value="discount-desc" ${f.sort === "discount-desc" ? "selected" : ""}>Giảm % nhiều nhất</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="product-grid" id="market-product-grid">
+              ${cardsHtml}
+            </div>
           </div>
         </div>
-      </div>
-
-      <!-- Product Grid -->
-      <div class="product-grid" id="market-product-grid">
-        ${cardsHtml}
       </div>
     </section>
   `;
 }
 
+/* ==================== AI STYLIST VIEW ==================== */
+
 function renderAIOutfitsStackHTML(cfg) {
   const outfits = generateAIOutfits(cfg);
   const selectedBody = BODY_SHAPES.find((b) => b.id === cfg.bodyShape) || BODY_SHAPES[0];
+
   return `
-          <div class="panel-card" style="padding:14px 18px; background:var(--forest-soft); border-color:#b7d8c9;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-              <div>
-                <strong>Quy tắc hình thể đang áp dụng (${selectedBody.name}):</strong>
-                <span style="font-size:13.5px; color:var(--forest-deep)"> ${selectedBody.rule}</span>
-              </div>
-              <span class="mono-badge" style="background:var(--forest); color:var(--lime)">
-                Engine v1.4 • ${outfits.length} bộ tối ưu
-              </span>
+    ${outfits
+      .map(
+        (outfit, idx) => `
+      <article class="outfit-card ${idx === 0 ? "best-match" : ""}">
+        <div class="outfit-header">
+          <div>
+            <div class="muted-xs" style="text-transform:uppercase; letter-spacing:0.06em;">
+              ${idx === 0 ? "ĐỀ XUẤT PHÙ HỢP NHẤT" : `GỢI Ý PHỐI #${idx + 1}`} • ${escapeHtml(cfg.occasion)}
             </div>
+            <h3 style="margin:3px 0 0; font-size:18px;">
+              Set ${escapeHtml(cfg.style)} cho ${escapeHtml(selectedBody.name)}
+            </h3>
           </div>
+          <span class="match-score-pill">Phù hợp ${outfit.score}%</span>
+        </div>
 
-          ${outfits
+        <div class="outfit-pieces">
+          ${outfit.pieces
             .map(
-              (outfit, idx) => `
-            <article class="outfit-card ${idx === 0 ? "best-match" : ""}">
-              <div class="outfit-header">
-                <div>
-                  <span class="mono-text" style="font-size:11.5px; color:var(--ink-subtle)">
-                    ${idx === 0 ? "★ ĐỀ XUẤT TỐI ƯU NHẤT" : `PHƯƠNG ÁN PHỐI #${idx + 1}`} • ${cfg.occasion.toUpperCase()}
-                  </span>
-                  <h3 style="margin:2px 0 0; font-size:18px;">
-                    Set ${cfg.style} cho dáng ${selectedBody.name}
-                  </h3>
-                </div>
-                <span class="match-score-pill">Độ khớp AI: ${outfit.score}%</span>
+              (piece) => `
+            <div class="piece-mini" data-open-product="${piece.id}">
+              <div class="piece-mini-img">
+                <img src="${escapeHtml(piece.image)}" alt="${escapeHtml(piece.name)}" loading="lazy" />
               </div>
-
-              <div class="outfit-layout">
-                <div class="tryon-canvas">
-                  ${renderVirtualTryOnSVG(cfg.bodyShape, outfit)}
-                  <div class="tryon-caption">
-                    Virtual Try-On Silhouette Preview<br/>
-                    <span style="color:var(--forest); font-weight:700">${outfit.withinBudget ? "✓ Trong ngân sách" : "⚠ Vượt nhẹ ngân sách"}</span>
-                  </div>
-                </div>
-
-                <div>
-                  <div class="outfit-pieces">
-                    ${outfit.pieces
-                      .map(
-                        (piece) => `
-                      <div class="piece-mini" data-open-product="${piece.id}">
-                        <div class="piece-role">${piece.slot === "outer" ? "Khoác ngoài" : piece.slot === "top" ? "Áo chính" : piece.slot === "bottom" ? "Quần / Váy" : "Phụ kiện"}</div>
-                        <div class="piece-mini-img">${renderGarmentSVG(piece)}</div>
-                        <div style="font-size:12px; font-weight:700; line-height:1.3">${escapeHtml(piece.name)}</div>
-                        <div class="mono-text" style="font-size:12px; color:var(--forest); font-weight:700">${formatVND(piece.price)}</div>
-                      </div>
-                    `
-                      )
-                      .join("")}
-                  </div>
-
-                  <div class="ai-explain-box">
-                    <strong>Giải thích từ AI Stylist:</strong>
-                    Kết hợp <em>${outfit.pieces.map((p) => p.silhouetteTag).join(" + ")}</em> giúp ${selectedBody.rule.toLowerCase()}
-                    Bảng màu <strong>${outfit.pieces.map((p) => p.colorName.split("/")[0].trim()).join(" / ")}</strong> cân bằng thị giác cho ngữ cảnh <em>${cfg.occasion}</em>.
-                  </div>
-                </div>
-              </div>
-
-              <div class="outfit-footer">
-                <div style="display:flex; gap:18px; flex-wrap:wrap; align-items:center;">
-                  <div>
-                    <div class="muted-xs">Tổng giá cả set</div>
-                    <strong class="mono-text" style="font-size:19px; color:var(--forest)">${formatVND(outfit.totalPrice)}</strong>
-                    <span class="price-old" style="margin-left:6px">${formatVND(outfit.totalOriginal)}</span>
-                  </div>
-                  <div>
-                    <div class="muted-xs">Tiết kiệm chi phí</div>
-                    <strong class="mono-text" style="color:var(--terracotta)">-${outfit.discountPct}%</strong>
-                  </div>
-                  <div>
-                    <div class="muted-xs">Tác động xanh của set</div>
-                    <strong class="mono-text" style="color:var(--forest)">-${outfit.totalCo2.toFixed(1)} kg CO₂ • ${outfit.totalWater.toLocaleString("vi-VN")}L nước</strong>
-                  </div>
-                </div>
-
-                <button class="btn-primary" data-add-outfit='${JSON.stringify(outfit.pieces.map((p) => p.id))}'>
-                  + Thêm cả ${outfit.pieces.length} món vào giỏ
-                </button>
-              </div>
-            </article>
+              <div class="piece-role">${piece.slot === "outer" ? "Khoác ngoài" : piece.slot === "top" ? "Áo chính" : piece.slot === "bottom" ? "Quần / Váy" : "Phụ kiện"}</div>
+              <div style="font-size:12.5px; font-weight:600; line-height:1.3">${escapeHtml(piece.name)}</div>
+              <div class="tabular" style="font-size:13px; font-weight:700">${formatVND(piece.price)}</div>
+            </div>
           `
             )
             .join("")}
+        </div>
+
+        <div class="ai-explain-box">
+          <strong>Gợi ý từ AI Stylist:</strong> ${selectedBody.rule}
+          Phối màu <strong>${outfit.pieces.map((p) => p.colorName.split("/")[0].trim()).join(" / ")}</strong> giúp tổng thể hài hòa cho dịp <em>${escapeHtml(cfg.occasion)}</em>.
+          ${outfit.withinBudget ? "" : " (Lưu ý: Tổng set nhỉnh hơn nhẹ mức ngân sách đang chọn.)"}
+        </div>
+
+        <div class="outfit-footer">
+          <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;" class="tabular">
+            <div>
+              <div class="muted-xs">Tổng giá cả set</div>
+              <strong style="font-size:18px">${formatVND(outfit.totalPrice)}</strong>
+              <span class="price-old" style="margin-left:6px">${formatVND(outfit.totalOriginal)}</span>
+            </div>
+            <div>
+              <div class="muted-xs">Tiết kiệm</div>
+              <strong style="color:var(--sale)">-${outfit.discountPct}%</strong>
+            </div>
+            <div>
+              <div class="muted-xs">Giảm phát thải</div>
+              <strong style="color:var(--eco)">-${outfit.totalCo2.toFixed(1)} kg CO₂</strong>
+            </div>
+          </div>
+
+          <button class="btn-primary" data-add-outfit='${JSON.stringify(outfit.pieces.map((p) => p.id))}'>
+            + Thêm cả ${outfit.pieces.length} món vào giỏ
+          </button>
+        </div>
+      </article>
+    `
+      )
+      .join("")}
   `;
 }
 
@@ -535,30 +576,18 @@ function renderAIStylistView() {
   const cfg = state.aiConfig;
 
   return `
-    <section class="view-section container">
-      <div class="section-head" style="margin-top:0">
-        <div>
-          <div class="section-kicker">AI STYLING ASSISTANT • MỤC 10.2.1 &amp; 11.1.4</div>
-          <h2 class="section-title">Phòng Thí Nghiệm AI Phối Đồ &amp; Chống Định Kiến Hình Thể</h2>
-          <p class="section-sub">
-            Kết hợp bộ lọc đa tầng <strong>Body Shape</strong> + <strong>Style Spectrum</strong> trên Metadata số hóa tại Studio Box
-            để loại bỏ định kiến thuật toán (AI Bias) và tối ưu ngân sách sinh viên.
-          </p>
+    <section class="view-section">
+      <div class="page-header-strip">
+        <div class="container">
+          <h1>Phối đồ AI thông minh</h1>
+          <p>Chọn vóc dáng, phong cách và ngân sách — hệ thống tự động gợi ý các bộ trang phục hoàn chỉnh từ kho đồ hiện có.</p>
         </div>
       </div>
 
-      <div class="ai-lab-grid">
-        <!-- Left Input Controls -->
-        <div class="panel-card">
-          <div class="bias-callout">
-            <strong>Cơ chế Anti-AI Bias (Mục 10.2.1):</strong> Thuật toán không chỉ ưu tiên số đo chuẩn mà phân bổ trọng số công bằng cho mọi hình dáng cơ thể và phom L–XL/Free-size.
-          </div>
-
+      <div class="container ai-lab-grid">
+        <div class="panel-card panel-card-muted">
           <div class="control-group">
-            <div class="control-label">
-              <span>1. Hình dáng cơ thể (Body Shape)</span>
-              <span class="mono-text" style="font-size:11px; color:var(--forest)">Dữ liệu đa tầng</span>
-            </div>
+            <div class="control-label"><span>1. Vóc dáng cơ thể</span></div>
             <div class="option-grid">
               ${BODY_SHAPES.map(
                 (b) => `
@@ -572,9 +601,7 @@ function renderAIStylistView() {
           </div>
 
           <div class="control-group">
-            <div class="control-label">
-              <span>2. Phổ phong cách (Style Spectrum)</span>
-            </div>
+            <div class="control-label"><span>2. Phong cách ưu tiên</span></div>
             <div class="option-grid">
               ${STYLE_SPECTRUMS.map(
                 (s) => `
@@ -589,8 +616,8 @@ function renderAIStylistView() {
 
           <div class="control-group">
             <div class="control-label">
-              <span>3. Ngân sách tối đa cho cả set</span>
-              <strong id="ai-budget-label" class="mono-text" style="color:var(--forest)">${formatVND(cfg.budget)}</strong>
+              <span>3. Ngân sách tối đa cho cả bộ</span>
+              <strong id="ai-budget-label" class="tabular">${formatVND(cfg.budget)}</strong>
             </div>
             <input
               type="range"
@@ -602,24 +629,24 @@ function renderAIStylistView() {
               value="${cfg.budget}"
             />
             <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-subtle)">
-              <span>220.000đ (Sinh viên tiết kiệm)</span>
-              <span>750.000đ (Full Upcycled)</span>
+              <span>220.000đ</span>
+              <span>750.000đ</span>
             </div>
           </div>
 
           <div class="control-group">
-            <div class="control-label"><span>4. Ngữ cảnh sử dụng</span></div>
+            <div class="control-label"><span>4. Dịp sử dụng</span></div>
             <select id="ai-occasion-select" class="input-control">
-              ${["Đi học / Giảng đường", "Thuyết trình / Phỏng vấn", "Cà phê cuối tuần"]
+              ${["Đi học / Dạo phố", "Đi làm / Thuyết trình", "Cuối tuần / Dạo phố"]
                 .map((occ) => `<option value="${occ}" ${cfg.occasion === occ ? "selected" : ""}>${occ}</option>`)
                 .join("")}
             </select>
           </div>
 
           <div class="control-group">
-            <div class="control-label"><span>5. Ghim 1 món từ kho (tùy chọn)</span></div>
+            <div class="control-label"><span>5. Ghim sẵn 1 món đồ (tùy chọn)</span></div>
             <select id="ai-anchor-select" class="input-control">
-              <option value="">-- Để AI tự động phối toàn bộ --</option>
+              <option value="">-- Để AI tự chọn toàn bộ --</option>
               ${PRODUCTS.map(
                 (p) =>
                   `<option value="${p.id}" ${cfg.anchorId === p.id ? "selected" : ""}>${escapeHtml(p.name)} (${formatVND(p.price)})</option>`
@@ -628,11 +655,10 @@ function renderAIStylistView() {
           </div>
 
           <button class="btn-primary" style="width:100%" id="run-ai-match-btn">
-            ⚡ Chạy AI Matching &amp; Cập nhật Phối Đồ
+            Cập nhật gợi ý phối đồ
           </button>
         </div>
 
-        <!-- Right Output Outfits -->
         <div class="outfit-results-stack" id="ai-outfits-stack">
           ${renderAIOutfitsStackHTML(cfg)}
         </div>
@@ -640,6 +666,8 @@ function renderAIStylistView() {
     </section>
   `;
 }
+
+/* ==================== SELL & CONSIGN VIEW ==================== */
 
 function evaluateSellerIntake(sf) {
   const allThreeNo = sf.noStructuralDamage && sf.noSurfaceDefect && sf.preWashed;
@@ -649,10 +677,10 @@ function evaluateSellerIntake(sf) {
     return {
       groupCode: "C",
       groupClass: "group-c",
-      groupLabel: "Nhóm C • Recycle (Tái chế công nghiệp Zero-Waste)",
-      explanation: "Sản phẩm chưa đáp ứng điều kiện tái lưu thông hoặc upcycle. CFD chuyển giao đối tác xử lý sợi tái chế để đảm bảo mục tiêu không rác thải dệt may.",
+      groupLabel: "Tái chế sợi công nghiệp (Zero-Waste)",
+      explanation: "Sản phẩm chưa đủ điều kiện bán lại hoặc tái thiết kế. CFD sẽ chuyển tới đối tác tái chế sợi để tránh phát thải ra môi trường.",
       directPrice: 0,
-      consignPrice: 0,
+      consignListPrice: 0,
       sellerNet: 0,
       canDirect: false,
       canConsign: false
@@ -666,8 +694,8 @@ function evaluateSellerIntake(sf) {
     return {
       groupCode: "A",
       groupClass: "group-a",
-      groupLabel: "Nhóm A • Ready-to-Resale (Đạt chuẩn '3 Không')",
-      explanation: "Sản phẩm đủ điều kiện tái lưu thông ngay sau bước giặt sấy công nghiệp, hấp diệt khuẩn y tế và chụp Studio số hóa.",
+      groupLabel: "Secondhand Tuyển Chọn (Đạt chuẩn 3-Không)",
+      explanation: "Sản phẩm đủ tiêu chuẩn lên sàn sau khi được giặt hấp diệt khuẩn và chụp ảnh Studio.",
       directPrice,
       consignListPrice,
       sellerNet,
@@ -676,15 +704,14 @@ function evaluateSellerIntake(sf) {
     };
   }
 
-  // Minor structural or surface defect -> Group B Upcycling Potential
   const directPrice = 12000;
   const consignListPrice = Math.round((basePrice * 0.42) / 5000) * 5000;
-  const sellerNet = Math.round(consignListPrice * 0.6); // 40% discount covers upcycling + hygiene + digitization
+  const sellerNet = Math.round(consignListPrice * 0.6);
   return {
     groupCode: "B",
     groupClass: "group-b",
-    groupLabel: "Nhóm B • Upcycling Potential (Tái thiết kế sáng tạo)",
-    explanation: "Có lỗi nhẹ về cấu trúc/bề mặt nhưng chất liệu tốt. Được phân luồng sang Phân khu 3 để sinh viên thiết kế cắt may thành mẫu Độc bản 1-of-1.",
+    groupLabel: "Phôi Upcycling (Tái thiết kế sáng tạo)",
+    explanation: "Sản phẩm có lỗi nhẹ nhưng chất vải tốt, phù hợp đưa vào xưởng cắt may thành thiết kế Upcycled độc bản.",
     directPrice,
     consignListPrice,
     sellerNet,
@@ -696,590 +723,176 @@ function evaluateSellerIntake(sf) {
 function renderSellView() {
   const sf = state.sellForm;
   const evalRes = evaluateSellerIntake(sf);
-  const stages = ["Tiếp nhận", "QA 3-Không", "Hấp diệt khuẩn", "Studio số hóa", "Đang bán / Đã chi trả"];
+  const stages = ["Tiếp nhận", "Kiểm định", "Giặt hấp", "Chụp Studio", "Đang bán / Đã chi"];
 
   return `
-    <section class="view-section container">
-      <div class="section-head" style="margin-top:0">
-        <div>
-          <div class="section-kicker">CỔNG MINIMALISM SELLER • MỤC 11.4.1 &amp; 11.4.4</div>
-          <h2 class="section-title">Đăng Bán Nhanh &amp; Ký Gửi Quần Áo Tuần Hoàn</h2>
-          <p class="section-sub">
-            Dành cho sinh viên Làng ĐH &amp; nhân viên văn phòng thanh lý tủ đồ. Hệ thống tự động kiểm tra tiêu chuẩn
-            <strong>"3 Không"</strong> và ước tính ngay mức thu mua <strong>Mua đứt (MoMo/ZaloPay)</strong> hoặc <strong>Ký gửi 60 ngày</strong>.
-          </p>
+    <section class="view-section">
+      <div class="page-header-strip">
+        <div class="container">
+          <h1>Đăng bán &amp; Ký gửi quần áo cũ</h1>
+          <p>Dọn tủ đồ nhanh gọn — chọn nhận tiền ngay qua MoMo/ZaloPay hoặc ký gửi 60 ngày để nhận lại 60–70% giá bán.</p>
         </div>
       </div>
 
-      <div class="sell-grid">
-        <!-- Form Panel -->
-        <div class="panel-card">
-          <h3 style="margin-top:0">1. Thông tin sản phẩm cần thanh lý</h3>
-          <div class="form-grid-2">
-            <div class="field-group">
-              <label for="sell-name">Tên sản phẩm</label>
-              <input id="sell-name" class="input-control" type="text" value="${escapeHtml(sf.itemName)}" />
-            </div>
-            <div class="field-group">
-              <label for="sell-cat">Danh mục</label>
-              <select id="sell-cat" class="input-control">
-                ${["Áo khoác", "Áo", "Quần & Váy", "Túi & Phụ kiện"]
-                  .map((c) => `<option value="${c}" ${sf.category === c ? "selected" : ""}>${c}</option>`)
-                  .join("")}
-              </select>
+      <div class="container">
+        <div class="steps-strip">
+          <div class="step-card">
+            <span class="step-num">1</span>
+            <div>
+              <strong>Kiểm tra tiêu chuẩn 3-Không</strong>
+              <p class="muted-xs">Hệ thống tự động ước tính giá thu mua hoặc giá niêm yết ký gửi ngay lập tức.</p>
             </div>
           </div>
-
-          <div class="form-grid-2">
-            <div class="field-group">
-              <label for="sell-orig-price">Giá mua mới ước tính (VNĐ)</label>
-              <input id="sell-orig-price" class="input-control" type="number" min="100000" step="50000" value="${sf.originalPrice}" />
-            </div>
-            <div class="field-group">
-              <label for="sell-cond">Tình trạng thực tế</label>
-              <select id="sell-cond" class="input-control">
-                <option value="95" ${sf.condition === "95" ? "selected" : ""}>Như mới (≥ 95%)</option>
-                <option value="85" ${sf.condition === "85" ? "selected" : ""}>Đã mặc vài lần (85–94%)</option>
-                <option value="defect" ${sf.condition === "defect" ? "selected" : ""}>Có lỗi nhẹ nhưng vải tốt (Phôi Upcycle)</option>
-              </select>
+          <div class="step-card">
+            <span class="step-num">2</span>
+            <div>
+              <strong>Gửi đồ tại trạm hoặc lấy tận nơi</strong>
+              <p class="muted-xs">Miễn phí thu nhận tại các điểm KTX ĐHQG, Thủ Đức hoặc thu gom tận nhà từ 5 món.</p>
             </div>
           </div>
-
-          <h3>2. Bộ tiêu chí kiểm định "3 Không" (Mục 11.4.4a)</h3>
-          <div class="qa-checklist">
-            <label class="qa-check-item">
-              <input type="checkbox" id="qa-struct" ${sf.noStructuralDamage ? "checked" : ""} />
-              <span><strong>Không hư hỏng cấu trúc:</strong> Không rách, thủng, mất cúc hoặc hỏng khóa kéo (trừ đồ đưa sang Upcycle).</span>
-            </label>
-            <label class="qa-check-item">
-              <input type="checkbox" id="qa-surface" ${sf.noSurfaceDefect ? "checked" : ""} />
-              <span><strong>Không biến dạng bề mặt nặng:</strong> Không xù lông quá mức, ố vàng vùng nhạy cảm hoặc phai màu hóa chất.</span>
-            </label>
-            <label class="qa-check-item">
-              <input type="checkbox" id="qa-wash" ${sf.preWashed ? "checked" : ""} />
-              <span><strong>Đã vệ sinh sơ bộ:</strong> Đã giặt sạch và làm khô trước khi bàn giao cho trạm tiếp nhận.</span>
-            </label>
-          </div>
-
-          <div class="classification-banner ${evalRes.groupClass}">
-            <div style="font-family:var(--font-mono); font-size:11.5px; font-weight:700">KẾT QUẢ PHÂN LUỒNG TỰ ĐỘNG</div>
-            <div style="font-size:16px; font-weight:800; margin:3px 0">${evalRes.groupLabel}</div>
-            <div style="font-size:13px">${evalRes.explanation}</div>
-          </div>
-
-          <h3>3. Chọn cơ chế thanh toán</h3>
-          <div class="payout-cards">
-            <div class="payout-option ${sf.payoutMode === "direct" ? "selected" : ""} ${!evalRes.canDirect ? "disabled" : ""}" data-payout="direct">
-              <div style="font-size:12px; font-weight:700; color:var(--terracotta)">MUA ĐỨT (DIRECT PURCHASE)</div>
-              <div class="mono-text" style="font-size:20px; font-weight:800; margin:4px 0; color:var(--forest)">
-                ${evalRes.canDirect ? formatVND(evalRes.directPrice) : "0đ (Tái chế)"}
-              </div>
-              <div class="muted-xs">Nhận tiền NGAY qua MoMo / ZaloPay (khung thu mua 10k–30k/món khi qua QA).</div>
-            </div>
-
-            <div class="payout-option ${sf.payoutMode === "consign" ? "selected" : ""} ${!evalRes.canConsign ? "disabled" : ""}" data-payout="consign">
-              <div style="font-size:12px; font-weight:700; color:var(--forest)">KÝ GỬI 60 NGÀY (CONSIGNMENT)</div>
-              <div class="mono-text" style="font-size:20px; font-weight:800; margin:4px 0; color:var(--forest)">
-                ${evalRes.canConsign ? `~${formatVND(evalRes.sellerNet)}` : "Không áp dụng"}
-              </div>
-              <div class="muted-xs">
-                ${evalRes.canConsign ? `Giá bán dự kiến ${formatVND(evalRes.consignListPrice)} (chiết khấu 30–40% phí vệ sinh &amp; Studio). Đối soát ngày 15 &amp; 30.` : "Chỉ chuyển đối tác tái chế Zero-Waste."}
-              </div>
-            </div>
-          </div>
-
-          <div class="field-group">
-            <label for="sell-station">4. Chọn trạm ký gửi vệ tinh / điểm thu gom</label>
-            <select id="sell-station" class="input-control">
-              ${DROPOFF_STATIONS.map(
-                (st) => `<option value="${st.id}" ${sf.stationId === st.id ? "selected" : ""}>${st.name} (${st.fee})</option>`
-              ).join("")}
-            </select>
-          </div>
-
-          <button class="btn-primary" style="width:100%" id="submit-sell-btn">
-            Tạo Phiếu Thu Gom / Ký Gửi &amp; Lấy Mã QR
-          </button>
-        </div>
-
-        <!-- Right Tracking Timeline -->
-        <div class="panel-card">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-            <h3 style="margin:0">Theo dõi xử lý của tôi</h3>
-            <span class="mono-badge" style="background:var(--forest-soft); color:var(--forest)">${state.submissions.length} phiếu</span>
-          </div>
-          <p class="muted-xs" style="margin-bottom:14px;">
-            Chính sách hoàn trả minh bạch (Mục 11.4.4d): hàng không đạt chuẩn được thông báo trong 48h để nhận lại hoặc chuyển quyên góp/tái chế.
-          </p>
-
-          <div class="submission-list">
-            ${state.submissions
-              .map(
-                (sub) => `
-              <div class="submission-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                  <strong class="mono-text" style="font-size:12px; color:var(--forest)">${escapeHtml(sub.id)}</strong>
-                  <span style="font-size:11.5px; color:var(--ink-subtle)">${escapeHtml(sub.createdAt)}</span>
-                </div>
-                <div style="font-weight:700; font-size:14.5px; margin:4px 0">${escapeHtml(sub.itemName)}</div>
-                <div style="font-size:12.5px; color:var(--ink-muted)">
-                  <strong>Phân loại:</strong> ${escapeHtml(sub.group)}<br/>
-                  <strong>Hình thức:</strong> ${escapeHtml(sub.mode)} • <strong>${escapeHtml(sub.estimatedValue)}</strong><br/>
-                  <strong>Điểm gửi:</strong> ${escapeHtml(sub.station)}
-                </div>
-                <div class="stage-pills">
-                  ${stages
-                    .map(
-                      (st, i) => `<span class="stage-pill ${i <= sub.stageIndex ? "done" : ""}">${i <= sub.stageIndex ? "✓ " : ""}${st}</span>`
-                    )
-                    .join("")}
-                </div>
-              </div>
-            `
-              )
-              .join("")}
-          </div>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-function renderEcoMetricsHTML(n) {
-  const co2 = (n * 6.5).toFixed(1);
-  const water = (n * 1950).toLocaleString("vi-VN");
-  const moneySaved = (n * 290000).toLocaleString("vi-VN");
-  const textileDiverted = (n * 0.48).toFixed(2);
-  return `
-          <div class="impact-metric-box">
-            <div class="muted-xs">Khí thải CO₂ cắt giảm</div>
-            <div class="impact-metric-val">-${co2} kg</div>
-            <div class="muted-xs">So với mua sản phẩm thời trang nhanh mới</div>
-          </div>
-          <div class="impact-metric-box">
-            <div class="muted-xs">Lượng nước ngọt bảo tồn</div>
-            <div class="impact-metric-val">${water} L</div>
-            <div class="muted-xs">Tiết kiệm từ khâu nhuộm &amp; canh tác bông</div>
-          </div>
-          <div class="impact-metric-box">
-            <div class="muted-xs">Chi phí sinh viên tiết kiệm</div>
-            <div class="impact-metric-val">${moneySaved}đ</div>
-            <div class="muted-xs">Trung bình rẻ hơn 50% so với hàng mới</div>
-          </div>
-          <div class="impact-metric-box">
-            <div class="muted-xs">Rác thải dệt may chặn lại</div>
-            <div class="impact-metric-val">${textileDiverted} kg</div>
-            <div class="muted-xs">Không bị thải ra bãi rác mỗi học kỳ</div>
-          </div>
-  `;
-}
-
-function renderEcosystemView() {
-  const activeZone = WORKSHOP_ZONES.find((z) => z.id === state.activeZone) || WORKSHOP_ZONES[0];
-  const n = state.ecoItemsPerSemester;
-
-  return `
-    <section class="view-section container">
-      <div class="section-head" style="margin-top:0">
-        <div>
-          <div class="section-kicker">CHUỖI CUNG ỨNG NGƯỢC 5 GIAI ĐOẠN • CHƯƠNG 11</div>
-          <h2 class="section-title">Trạm Xử Lý Trung Tâm 100m² (One-Way Flow) &amp; Tác Động Môi Trường</h2>
-          <p class="section-sub">
-            Đặt tại khu vực tiếp giáp <strong>Làng Đại học (Thủ Đức / Dĩ An)</strong>, thiết kế theo nguyên tắc dòng chảy một chiều
-            triệt tiêu 100% rủi ro nhiễm chéo và tối ưu công suất <strong>1.500 – 2.000 sản phẩm/tháng</strong>.
-          </p>
-        </div>
-      </div>
-
-      <div class="hub-layout">
-        <div class="panel-card">
-          <h3 style="margin-top:0">Sơ đồ mặt bằng 5 phân khu (Nhấp chọn phân khu để khám phá)</h3>
-          <div class="zone-tabs">
-            ${WORKSHOP_ZONES.map(
-              (z) => `
-              <button class="zone-tab ${z.id === state.activeZone ? "active" : ""}" data-zone-btn="${z.id}">
-                <span class="zone-tab-num">${z.code}</span>
-                <span class="zone-tab-name">${z.name.split("&")[0].trim()}</span>
-              </button>
-            `
-            ).join("")}
-          </div>
-
-          <div id="floorplan-svg-wrap">
-            ${renderFloorplanSVG(state.activeZone)}
-          </div>
-        </div>
-
-        <div class="panel-card" style="border-color:var(--forest)">
-          <div class="mono-text" style="font-size:11.5px; color:var(--terracotta); font-weight:700">${activeZone.code} • ${activeZone.areaPct}</div>
-          <h3 style="margin:6px 0 12px; font-size:21px">${activeZone.name}</h3>
-          <div style="display:grid; gap:12px; font-size:13.5px;">
-            <div style="background:var(--bg); padding:12px; border-radius:10px; border:1px solid var(--border)">
-              <strong>Vai trò vận hành:</strong><br/>${activeZone.flowRole}
-            </div>
-            <div style="background:var(--bg); padding:12px; border-radius:10px; border:1px solid var(--border)">
-              <strong>Thiết bị &amp; Chiến lược Asset-light (Bảng 19):</strong><br/>${activeZone.equipment}
-            </div>
-            <div style="background:var(--forest-soft); padding:12px; border-radius:10px; border:1px solid #b7d8c9; color:var(--forest-deep)">
-              <strong>Quy trình chuẩn hóa:</strong><br/>${activeZone.process}
+          <div class="step-card">
+            <span class="step-num">3</span>
+            <div>
+              <strong>Nhận thanh toán minh bạch</strong>
+              <p class="muted-xs">Mua đứt nhận tiền ngay, hoặc ký gửi đối soát định kỳ vào ngày 15 &amp; 30 hằng tháng.</p>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Eco Impact Simulator -->
-      <div class="panel-card" style="margin-top:24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-          <div>
-            <div class="section-kicker">CÔNG CỤ ĐO LƯỜNG TÁC ĐỘNG BỀN VỮNG</div>
-            <h3 style="margin:0">Ước tính đóng góp Xanh của bạn khi chuyển sang Thời trang Tuần hoàn</h3>
-          </div>
-          <div style="min-width:260px;">
-            <label for="eco-slider" style="font-size:13px; font-weight:700; display:flex; justify-content:space-between;">
-              <span>Số món đồ secondhand/upcycle mỗi học kỳ:</span>
-              <span id="eco-count-label" class="mono-text" style="color:var(--forest)">${n} món</span>
-            </label>
-            <input id="eco-slider" type="range" class="range-input" min="1" max="24" value="${n}" />
-          </div>
-        </div>
-
-        <div class="impact-grid" id="eco-impact-grid">
-          ${renderEcoMetricsHTML(n)}
-        </div>
-      </div>
-
-      <!-- IP & Legal Protection Framework -->
-      <div class="section-head">
-        <div>
-          <div class="section-kicker">SỞ HỮU TRÍ TUỆ &amp; PHÁP LÝ UPCYCLING • MỤC 10.4</div>
-          <h2 class="section-title">Khung bảo hộ tài sản vô hình &amp; Tuân thủ thương hiệu gốc</h2>
-        </div>
-      </div>
-      <div class="ip-grid">
-        <div class="panel-card">
-          <div class="mono-text" style="font-size:11px; color:var(--forest); font-weight:700">TRADEMARK</div>
-          <h4 style="margin:6px 0">Nhãn hiệu Nhóm 25 &amp; 35</h4>
-          <p class="muted-xs">Đăng ký bảo hộ tên thương hiệu CFD &amp; logo vòng lặp vô cực tại Cục Sở hữu trí tuệ VN.</p>
-        </div>
-        <div class="panel-card">
-          <div class="mono-text" style="font-size:11px; color:var(--terracotta); font-weight:700">INDUSTRIAL DESIGN</div>
-          <h4 style="margin:6px 0">Kiểu dáng Bộ sưu tập giới hạn</h4>
-          <p class="muted-xs">Bảo hộ thiết kế Upcycled độc bản, chống sao chép ý tưởng từ các đối thủ trên thị trường.</p>
-        </div>
-        <div class="panel-card">
-          <div class="mono-text" style="font-size:11px; color:var(--forest); font-weight:700">TRADE SECRET</div>
-          <h4 style="margin:6px 0">Thuật toán AI &amp; NDA</h4>
-          <p class="muted-xs">Quản trị mã nguồn qua Git Enterprise kèm điều khoản bảo mật NDA cho toàn đội ngũ core-team.</p>
-        </div>
-        <div class="panel-card">
-          <div class="mono-text" style="font-size:11px; color:var(--terracotta); font-weight:700">BRAND DISCLAIMER</div>
-          <h4 style="margin:6px 0">Nhãn phụ minh bạch IP</h4>
-          <p class="muted-xs">Giữ nguyên logo gốc và gắn nhãn: <em>"Sản phẩm được tái tạo độc lập từ nguyên liệu chính hãng"</em>.</p>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-function renderBreakEvenChartSVG(simUsers, arpu) {
-  const maxUsers = 20000;
-  const maxMoney = 2600; // triệu VNĐ
-  const w = 620;
-  const h = 280;
-  const padL = 56;
-  const padR = 24;
-  const padT = 22;
-  const padB = 42;
-  const plotW = w - padL - padR;
-  const plotH = h - padT - padB;
-
-  const xFor = (u) => padL + (Math.min(u, maxUsers) / maxUsers) * plotW;
-  const yFor = (m) => padT + plotH - (Math.min(m, maxMoney) / maxMoney) * plotH;
-
-  // Baseline costs in report: Fixed = 420M, Total at 3000 users = 820M -> variable ~ 133.33M per 1000? Wait:
-  // In Table 26 (p.66): Fixed = 420tr, Variable at Y1 = 400tr (for 3000 users -> or constant step). Using Table 26 exact break-even: 820tr at 8200 users (when ARPU = 100k).
-  // Let's model Total Cost smoothly passing through (0, 420) and (8200, 820) so Break-Even visually locks at 8.200 users when ARPU = 100k!
-  const varSlopePerUser = (820 - 420) / 8200; // ~0.04878 tr/user
-  const costAt = (u) => 420 + varSlopePerUser * u;
-  const revAt = (u) => (u * arpu) / 1_000_000;
-
-  const currentRev = revAt(simUsers);
-  const currentCost = costAt(simUsers);
-
-  // Break-even dynamic users: 420 / (arpu/1e6 - varSlopePerUser)
-  const unitMargin = arpu / 1_000_000 - varSlopePerUser;
-  const beUsers = unitMargin > 0 ? Math.round(420 / unitMargin) : null;
-  const beRev = beUsers ? revAt(beUsers) : null;
-
-  const gridLines = [0, 500, 1000, 1500, 2000, 2500]
-    .map(
-      (m) => `
-      <line x1="${padL}" y1="${yFor(m)}" x2="${w - padR}" y2="${yFor(m)}" stroke="#E1DDD2" stroke-dasharray="3 3"/>
-      <text x="${padL - 8}" y="${yFor(m) + 4}" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#78827B">${m}tr</text>
-    `
-    )
-    .join("");
-
-  const xTicks = [0, 5000, 10000, 15000, 20000]
-    .map(
-      (u) => `
-      <text x="${xFor(u)}" y="${h - 14}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#78827B">${(u / 1000).toFixed(0)}k</text>
-    `
-    )
-    .join("");
-
-  const beMarker =
-    beUsers && beUsers <= maxUsers && beRev <= maxMoney
-      ? `
-      <line x1="${xFor(beUsers)}" y1="${yFor(beRev)}" x2="${xFor(beUsers)}" y2="${yFor(0)}" stroke="#C25934" stroke-dasharray="4 3" stroke-width="1.5"/>
-      <circle cx="${xFor(beUsers)}" cy="${yFor(beRev)}" r="5.5" fill="#C25934" stroke="#FFFFFF" stroke-width="2"/>
-      <text x="${xFor(beUsers)}" y="${yFor(beRev) - 10}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#C25934">
-        Hòa vốn: ${beUsers.toLocaleString("vi-VN")} users
-      </text>
-    `
-      : "";
-
-  const clampedSimX = xFor(Math.min(simUsers, maxUsers));
-  const clampedSimRevY = yFor(Math.min(currentRev, maxMoney));
-
-  return `
-    <svg viewBox="0 0 ${w} ${h}" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Biểu đồ phân tích điểm hòa vốn CFD">
-      ${gridLines}
-      ${xTicks}
-      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${yFor(0)}" stroke="#9CA3AF" stroke-width="1.2"/>
-      <line x1="${padL}" y1="${yFor(0)}" x2="${w - padR}" y2="${yFor(0)}" stroke="#9CA3AF" stroke-width="1.2"/>
-
-      <!-- Fixed Cost Line -->
-      <line x1="${xFor(0)}" y1="${yFor(420)}" x2="${xFor(maxUsers)}" y2="${yFor(420)}" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="5 4"/>
-      <!-- Total Cost Line -->
-      <line x1="${xFor(0)}" y1="${yFor(costAt(0))}" x2="${xFor(maxUsers)}" y2="${yFor(costAt(maxUsers))}" stroke="#B45309" stroke-width="2.5"/>
-      <!-- Revenue Line -->
-      <line x1="${xFor(0)}" y1="${yFor(0)}" x2="${xFor(maxUsers)}" y2="${yFor(revAt(maxUsers))}" stroke="#0F3D2E" stroke-width="3"/>
-
-      ${beMarker}
-
-      <!-- Active Simulation Point -->
-      <circle cx="${clampedSimX}" cy="${clampedSimRevY}" r="6" fill="#10B981" stroke="#09261D" stroke-width="2"/>
-      <text x="${w - padR}" y="${padT + 10}" text-anchor="end" font-family="Be Vietnam Pro, sans-serif" font-size="10.5" font-weight="700" fill="#0F3D2E">
-        ━ Doanh thu &nbsp; ━ Tổng chi phí &nbsp; ┅ Chi phí cố định (420tr)
-      </text>
-      <text x="${padL + plotW / 2}" y="${h - 2}" text-anchor="middle" font-size="10" fill="#555E58">Quy mô người dùng hoạt động (users/năm)</text>
-    </svg>
-  `;
-}
-
-function renderFinanceMetricsHTML(users, arpu) {
-  const revM = (users * arpu) / 1_000_000;
-  const varSlopePerUser = (820 - 420) / 8200;
-  const totalCostM = 420 + varSlopePerUser * users;
-  const profitM = revM - totalCostM;
-  const unitMargin = arpu / 1_000_000 - varSlopePerUser;
-  const beUsers = unitMargin > 0 ? Math.round(420 / unitMargin) : "Không đạt";
-  return `
-          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:14px;">
-            <div class="impact-metric-box">
-              <div class="muted-xs">Doanh thu ước tính</div>
-              <div class="mono-text" style="font-weight:800; color:var(--forest); font-size:15px">${formatMillion(revM)}</div>
-            </div>
-            <div class="impact-metric-box">
-              <div class="muted-xs">Chi phí vận hành</div>
-              <div class="mono-text" style="font-weight:800; color:var(--amber); font-size:15px">${formatMillion(totalCostM)}</div>
-            </div>
-            <div class="impact-metric-box">
-              <div class="muted-xs">Lợi nhuận gộp</div>
-              <div class="mono-text" style="font-weight:800; color:${profitM >= 0 ? "var(--forest)" : "var(--terracotta)"}; font-size:15px">
-                ${profitM >= 0 ? "+" : ""}${formatMillion(profitM)}
-              </div>
-            </div>
-          </div>
-          <p class="muted-xs" style="margin-top:10px;">
-            Ngưỡng hòa vốn ở ARPU ${formatVND(arpu)}: <strong>${typeof beUsers === "number" ? beUsers.toLocaleString("vi-VN") + " người dùng" : beUsers}</strong>.
-          </p>
-  `;
-}
-
-function renderPitchView() {
-  const { users, arpu } = state.financeSim;
-
-  return `
-    <section class="view-section container">
-      <div class="section-head" style="margin-top:0">
-        <div>
-          <div class="section-kicker">HỒ SƠ DỰ ÁN KHỞI NGHIỆP • CHƯƠNG 5, 7, 9, 12, 13</div>
-          <h2 class="section-title">Circular Fashion Digital (CFD) — Mô Hình Kinh Doanh &amp; Tài Chính</h2>
-          <p class="section-sub">
-            Thị trường tiền tiêu sinh viên <strong>2,16 triệu người</strong> (TAM <strong>216 tỷ VNĐ/năm</strong>).
-            Hiện hoàn tất <strong>Gate 2 — Business Case</strong> (Stage-Gate) và sẵn sàng triển khai Pilot tại Làng ĐH ĐHQG-HCM.
-          </p>
-        </div>
-      </div>
-
-      <!-- KPI Strip -->
-      <div class="kpi-strip">
-        <div class="kpi-card">
-          <div class="kpi-label">Tổng vốn đầu tư (Chương 13)</div>
-          <div class="kpi-val">1,2 tỷ VNĐ</div>
-          <div class="kpi-sub">720tr VCSH (60%) + 480tr Vay NH (8%/năm)</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Điểm hòa vốn chuẩn (Bảng 26)</div>
-          <div class="kpi-val">8.200 users</div>
-          <div class="kpi-sub">Tương ứng doanh thu 820 triệu VNĐ/năm</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Hiệu quả đầu tư (Bảng 27)</div>
-          <div class="kpi-val">ROI 25% • IRR ~22%</div>
-          <div class="kpi-sub">NPV ~600 triệu • Hoàn vốn (PP) ~4 năm</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Kiểm soát CAC (Mục 8.7.5)</div>
-          <div class="kpi-val">&lt; 30.000đ</div>
-          <div class="kpi-sub">ARPU 100k–300k/năm • Phí sàn 5–10%</div>
-        </div>
-      </div>
-
-      <!-- Interactive Financial Break-even Simulator -->
-      <div class="finance-grid">
-        <div class="panel-card">
-          <h3 style="margin-top:0">Mô phỏng Điểm Hòa Vốn &amp; Độ Nhạy Doanh Thu</h3>
-          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">
-            <button class="filter-chip" data-fin-preset="3000,100000">Năm 1 (3.000 users)</button>
-            <button class="filter-chip" data-fin-preset="8200,100000">Điểm hòa vốn (8.200)</button>
-            <button class="filter-chip" data-fin-preset="20000,120000">Năm 2 (20.000)</button>
-            <button class="filter-chip" data-fin-preset="50000,150000">Năm 3 (50.000)</button>
-          </div>
-
-          <div class="control-group">
-            <div class="control-label">
-              <span>Số người dùng hoạt động / năm</span>
-              <strong id="fin-users-label" class="mono-text" style="color:var(--forest)">${users.toLocaleString("vi-VN")} người</strong>
-            </div>
-            <input id="fin-users-slider" type="range" class="range-input" min="1000" max="50000" step="500" value="${users}" />
-          </div>
-
-          <div class="control-group">
-            <div class="control-label">
-              <span>Doanh thu TB / người / năm (ARPU)</span>
-              <strong id="fin-arpu-label" class="mono-text" style="color:var(--forest)">${formatVND(arpu)}</strong>
-            </div>
-            <input id="fin-arpu-slider" type="range" class="range-input" min="80000" max="300000" step="10000" value="${arpu}" />
-          </div>
-
-          <div id="fin-metrics-summary">
-            ${renderFinanceMetricsHTML(users, arpu)}
-          </div>
-        </div>
-
-        <div class="panel-card">
-          <h3 style="margin-top:0">Biểu đồ Đường Doanh Thu vs Tổng Chi Phí</h3>
-          <div class="chart-box" id="fin-chart-box">
-            ${renderBreakEvenChartSVG(users, arpu)}
-          </div>
-        </div>
-      </div>
-
-      <!-- 3-Phase Market Expansion + Budget Allocation -->
-      <div class="section-head">
-        <div>
-          <div class="section-kicker">LỘ TRÌNH TĂNG TRƯỞNG &amp; PHÂN BỔ NGUỒN LỰC</div>
-          <h2 class="section-title">Chiến lược mở rộng 3 Giai đoạn &amp; Kế hoạch 6 tháng tiền ra mắt</h2>
-        </div>
-      </div>
-
-      <div class="roadmap-grid">
-        ${FINANCIAL_BASELINE.stages
-          .map(
-            (st) => `
+        <div class="sell-grid">
           <div class="panel-card">
-            <div class="mono-text" style="font-size:11.5px; color:var(--terracotta); font-weight:700">${st.phase}</div>
-            <h3 style="margin:6px 0 8px; font-size:18px">${st.title}</h3>
-            <p class="muted-xs" style="margin-bottom:12px">${st.market}</p>
-            <div style="display:grid; gap:6px; font-size:13px;">
-              <div><strong>MPR:</strong> <span class="mono-text">${st.mpr}</span></div>
-              <div><strong>Người dùng:</strong> <span class="mono-text">${st.users}</span></div>
-              <div><strong>Doanh thu dự kiến:</strong> <strong class="mono-text" style="color:var(--forest)">${st.revenue}</strong></div>
-              <div><strong>Biên lợi nhuận gộp:</strong> <span class="mono-text">${st.grossMargin}</span></div>
+            <h3 style="margin-top:0">Thông tin sản phẩm gửi bán</h3>
+            <div class="form-grid-2">
+              <div class="field-group">
+                <label for="sell-name">Tên sản phẩm</label>
+                <input id="sell-name" class="input-control" type="text" value="${escapeHtml(sf.itemName)}" />
+              </div>
+              <div class="field-group">
+                <label for="sell-cat">Danh mục</label>
+                <select id="sell-cat" class="input-control">
+                  ${["Áo khoác", "Áo", "Quần & Váy", "Túi & Phụ kiện"]
+                    .map((c) => `<option value="${c}" ${sf.category === c ? "selected" : ""}>${c}</option>`)
+                    .join("")}
+                </select>
+              </div>
             </div>
+
+            <div class="form-grid-2">
+              <div class="field-group">
+                <label for="sell-orig-price">Giá mua mới ước tính (VNĐ)</label>
+                <input id="sell-orig-price" class="input-control" type="number" min="100000" step="50000" value="${sf.originalPrice}" />
+              </div>
+              <div class="field-group">
+                <label for="sell-cond">Tình trạng thực tế</label>
+                <select id="sell-cond" class="input-control">
+                  <option value="95" ${sf.condition === "95" ? "selected" : ""}>Như mới (≥ 95%)</option>
+                  <option value="85" ${sf.condition === "85" ? "selected" : ""}>Đã mặc vài lần (85–94%)</option>
+                  <option value="defect" ${sf.condition === "defect" ? "selected" : ""}>Có lỗi nhẹ nhưng vải tốt (Phôi Upcycle)</option>
+                </select>
+              </div>
+            </div>
+
+            <h4>Tự kiểm định theo tiêu chuẩn 3-Không</h4>
+            <div class="qa-checklist">
+              <label class="qa-check-item">
+                <input type="checkbox" id="qa-struct" ${sf.noStructuralDamage ? "checked" : ""} />
+                <span><strong>Không hư hỏng cấu trúc:</strong> Không rách, thủng, mất cúc hoặc hỏng khóa kéo.</span>
+              </label>
+              <label class="qa-check-item">
+                <input type="checkbox" id="qa-surface" ${sf.noSurfaceDefect ? "checked" : ""} />
+                <span><strong>Không biến dạng bề mặt:</strong> Không xù lông quá mức, ố vàng hoặc phai màu nặng.</span>
+              </label>
+              <label class="qa-check-item">
+                <input type="checkbox" id="qa-wash" ${sf.preWashed ? "checked" : ""} />
+                <span><strong>Đã giặt sạch sơ bộ:</strong> Đã giặt và phơi khô trước khi gửi trạm.</span>
+              </label>
+            </div>
+
+            <div class="classification-banner ${evalRes.groupClass}">
+              <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Phân loại tự động</div>
+              <div style="font-size:15.5px; font-weight:700; margin:3px 0">${evalRes.groupLabel}</div>
+              <div style="font-size:13px">${evalRes.explanation}</div>
+            </div>
+
+            <h4>Chọn hình thức thanh toán</h4>
+            <div class="payout-cards">
+              <div class="payout-option ${sf.payoutMode === "direct" ? "selected" : ""} ${!evalRes.canDirect ? "disabled" : ""}" data-payout="direct">
+                <div style="font-size:11.5px; font-weight:700; text-transform:uppercase;">Mua đứt (Direct)</div>
+                <div class="tabular" style="font-size:19px; font-weight:800; margin:4px 0;">
+                  ${evalRes.canDirect ? formatVND(evalRes.directPrice) : "0đ (Tái chế)"}
+                </div>
+                <div class="muted-xs">Nhận tiền ngay qua MoMo / ZaloPay khi qua bước kiểm định tại trạm.</div>
+              </div>
+
+              <div class="payout-option ${sf.payoutMode === "consign" ? "selected" : ""} ${!evalRes.canConsign ? "disabled" : ""}" data-payout="consign">
+                <div style="font-size:11.5px; font-weight:700; text-transform:uppercase;">Ký gửi 60 ngày</div>
+                <div class="tabular" style="font-size:19px; font-weight:800; margin:4px 0;">
+                  ${evalRes.canConsign ? `~${formatVND(evalRes.sellerNet)}` : "Không áp dụng"}
+                </div>
+                <div class="muted-xs">
+                  ${evalRes.canConsign ? `Giá bán dự kiến ${formatVND(evalRes.consignListPrice)} (nhận 60–70% khi bán thành công).` : "Chỉ chuyển tái chế sợi."}
+                </div>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label for="sell-station">Điểm gửi đồ hoặc thu gom tận nơi</label>
+              <select id="sell-station" class="input-control">
+                ${DROPOFF_STATIONS.map(
+                  (st) => `<option value="${st.id}" ${sf.stationId === st.id ? "selected" : ""}>${st.name} (${st.fee})</option>`
+                ).join("")}
+              </select>
+            </div>
+
+            <button class="btn-primary" style="width:100%" id="submit-sell-btn">
+              Tạo phiếu gửi đồ &amp; Lấy mã theo dõi
+            </button>
           </div>
-        `
-          )
-          .join("")}
-      </div>
 
-      <div class="finance-grid" style="margin-top:20px;">
-        <div class="panel-card">
-          <h3 style="margin-top:0">Phân bổ vốn huy động (Bảng 16)</h3>
-          ${FINANCIAL_BASELINE.budgetAllocation
-            .map(
-              (b) => `
-            <div style="margin-bottom:12px;">
-              <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;">
-                <span>${b.label}</span>
-                <span class="mono-text" style="color:var(--forest)">${b.pct}%</span>
-              </div>
-              <div style="height:9px; background:var(--bg-alt); border-radius:99px; overflow:hidden; margin:4px 0;">
-                <div style="width:${b.pct}%; height:100%; background:var(--forest); border-radius:99px;"></div>
-              </div>
-              <div class="muted-xs">${b.purpose}</div>
+          <div class="panel-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <h3 style="margin:0">Đơn ký gửi của bạn</h3>
+              <span class="header-badge">${state.submissions.length}</span>
             </div>
-          `
-            )
-            .join("")}
-        </div>
+            <p class="muted-xs" style="margin-bottom:14px;">
+              Sản phẩm không đạt chuẩn được thông báo trong 48 giờ để bạn nhận lại tại trạm hoặc chuyển quyên góp/tái chế.
+            </p>
 
-        <div class="panel-card">
-          <h3 style="margin-top:0">Biểu đồ GANTT 6 tháng chuẩn bị (Bảng 20)</h3>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Thời gian</th>
-                <th>Hoạt động chính</th>
-                <th>Mục tiêu đầu ra</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${FINANCIAL_BASELINE.gantt6Months
+            <div class="submission-list">
+              ${state.submissions
                 .map(
-                  (g) => `
-                <tr>
-                  <td><span class="mono-badge" style="background:${g.color}; color:#fff">${g.month}</span></td>
-                  <td><strong>${g.task}</strong></td>
-                  <td style="font-size:12.5px; color:var(--ink-muted)">${g.goal}</td>
-                </tr>
+                  (sub) => `
+                <div class="submission-card">
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                    <strong class="tabular" style="font-size:12px;">${escapeHtml(sub.id)}</strong>
+                    <span class="muted-xs">${escapeHtml(sub.createdAt)}</span>
+                  </div>
+                  <div style="font-weight:700; font-size:14px; margin:4px 0">${escapeHtml(sub.itemName)}</div>
+                  <div class="muted-xs" style="line-height:1.5">
+                    <strong>Nhóm:</strong> ${escapeHtml(sub.group)}<br/>
+                    <strong>Hình thức:</strong> ${escapeHtml(sub.mode)} • <strong>${escapeHtml(sub.estimatedValue)}</strong><br/>
+                    <strong>Điểm gửi:</strong> ${escapeHtml(sub.station)}
+                  </div>
+                  <div class="stage-pills">
+                    ${stages
+                      .map(
+                        (st, i) => `<span class="stage-pill ${i <= sub.stageIndex ? "done" : ""}">${i <= sub.stageIndex ? "✓ " : ""}${st}</span>`
+                      )
+                      .join("")}
+                  </div>
+                </div>
               `
                 )
                 .join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Founding Team -->
-      <div class="section-head">
-        <div>
-          <div class="section-kicker">NHÓM 02 • LỚP L04 – HK 252 • ĐẠI HỌC BÁCH KHOA TP.HCM</div>
-          <h2 class="section-title">Đội ngũ sáng lập &amp; Giảng viên hướng dẫn</h2>
-          <p class="section-sub">Giảng viên giảng dạy: <strong>Thầy Nguyễn Hữu Sơn</strong> • Bộ môn Khởi nghiệp (IM1021)</p>
-        </div>
-      </div>
-
-      <div class="team-grid">
-        ${TEAM_MEMBERS.map(
-          (m) => `
-          <div class="team-card">
-            <div class="team-avatar">${m.initials}</div>
-            <div style="font-weight:800; font-size:15px;">${m.name}</div>
-            <div style="font-size:12px; font-weight:700; color:var(--terracotta); margin:3px 0 8px;">${m.role}</div>
-            <div class="muted-xs">${m.focus}</div>
+            </div>
           </div>
-        `
-        ).join("")}
+        </div>
       </div>
     </section>
   `;
 }
 
-/* ==================== MODAL & DRAWER RENDERERS ==================== */
+/* ==================== MODALS & DRAWERS ==================== */
 
 function openProductModal(productId) {
   const p = PRODUCTS.find((item) => item.id === productId);
@@ -1288,6 +901,7 @@ function openProductModal(productId) {
   const body = document.getElementById("product-modal-body");
   const savePct = Math.round(((p.originalPrice - p.price) / p.originalPrice) * 100);
   const inCart = state.cart.includes(p.id);
+  const isSaved = state.wishlist.includes(p.id);
 
   const measureEntries = Object.entries(p.measurements)
     .map(([k, v]) => `<span class="spec-pill"><strong>${k}:</strong> ${v}</span>`)
@@ -1296,59 +910,52 @@ function openProductModal(productId) {
   body.innerHTML = `
     <div class="dpp-grid">
       <div class="dpp-visual">
-        ${renderGarmentSVG(p)}
-        <div style="display:flex; gap:8px; margin-top:12px; align-items:center;">
-          <span class="muted-xs">Bảng màu thực tế:</span>
-          ${p.colors.map((c) => `<span style="width:18px; height:18px; border-radius:50%; background:${c}; border:1px solid #ccc; display:inline-block;"></span>`).join("")}
-        </div>
+        <img src="${escapeHtml(p.image)}" alt="${escapeHtml(p.name)}" />
       </div>
 
       <div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
-          <span class="tier-badge ${p.tier === "A" ? "tier-a" : "tier-b"}" style="position:static">${p.tierLabel}</span>
-          <span class="mono-badge" style="background:var(--bg); color:var(--ink); border-color:var(--border)">SKU: ${p.id}</span>
+        <div class="muted-xs" style="text-transform:uppercase; letter-spacing:0.06em;">
+          ${escapeHtml(p.brand)} • ${escapeHtml(p.tierLabel)} • ${p.id}
         </div>
+        <h2 id="modal-product-title" style="margin:6px 0 8px; font-size:22px;">${escapeHtml(p.name)}</h2>
 
-        <h2 id="modal-product-title" style="margin:4px 0 8px; font-size:22px;">${escapeHtml(p.name)}</h2>
-
-        <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:10px;">
-          <span class="price-now" style="font-size:24px">${formatVND(p.price)}</span>
+        <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:10px;" class="tabular">
+          <span style="font-size:24px; font-weight:800;">${formatVND(p.price)}</span>
           <span class="price-old" style="font-size:15px">${formatVND(p.originalPrice)}</span>
-          <span class="price-save">Tiết kiệm ${savePct}%</span>
+          <span style="font-size:13px; font-weight:700; color:var(--sale)">Tiết kiệm ${savePct}%</span>
         </div>
 
-        <div class="product-specs" style="margin-bottom:12px;">
+        <div class="spec-pills">
           <span class="spec-pill">Size: ${escapeHtml(p.size)}</span>
           <span class="spec-pill">Chất liệu: ${escapeHtml(p.fabric)}</span>
           ${measureEntries}
         </div>
 
         <div class="dpp-passport-box">
-          <div style="font-family:var(--font-mono); font-size:11px; font-weight:700; color:var(--forest)">
-            DIGITAL PRODUCT PASSPORT • HỘ CHIẾU VÒNG ĐỜI SẢN PHẨM
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">
+            Cam kết chất lượng &amp; Nguồn gốc sản phẩm
           </div>
           <div class="dpp-layers">
-            <div><strong>✓ Lớp 1 (QA 3-Không):</strong> ${escapeHtml(p.condition)}</div>
-            <div><strong>✓ Lớp 2 (Vệ sinh y tế):</strong> ${escapeHtml(p.hygieneBatch)}</div>
-            <div><strong>✓ Lớp 3 (Nguồn gốc &amp; Studio):</strong> ${escapeHtml(p.origin)}</div>
-            <div><strong>🌱 Tác động môi trường:</strong> Giảm <strong>${p.co2SavedKg} kg CO₂</strong> &amp; tiết kiệm <strong>${p.waterSavedL.toLocaleString("vi-VN")} lít nước</strong></div>
+            <div><strong>✓ Kiểm định 3-Không:</strong> ${escapeHtml(p.condition)}</div>
+            <div><strong>✓ Vệ sinh y tế:</strong> ${escapeHtml(p.hygieneBatch)}</div>
+            <div><strong>✓ Nguồn gốc:</strong> ${escapeHtml(p.origin)}</div>
+            <div><strong>✓ Tác động xanh:</strong> Giảm <strong>${p.co2SavedKg} kg CO₂</strong> &amp; tiết kiệm <strong>${p.waterSavedL.toLocaleString("vi-VN")} lít nước</strong></div>
           </div>
         </div>
 
-        ${
-          p.legalDisclaimer
-            ? `<div class="disclaimer-box">⚖ Tuân thủ IP (Mục 10.4.4): ${escapeHtml(p.legalDisclaimer)}</div>`
-            : ""
-        }
+        ${p.legalDisclaimer ? `<div class="disclaimer-box">${escapeHtml(p.legalDisclaimer)}</div>` : ""}
 
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px;">
-          <button class="btn-primary" id="modal-add-cart" data-id="${p.id}">
+          <button class="btn-primary" style="flex:1" id="modal-add-cart">
             ${inCart ? "✓ Đã có trong giỏ hàng" : "+ Thêm vào giỏ hàng"}
           </button>
-          <button class="btn-outline" id="modal-pin-ai" data-id="${p.id}">
-            ✨ Phối set với món này bằng AI
+          <button class="btn-outline" id="modal-wish-btn">
+            ${isSaved ? "♥ Đã lưu" : "♡ Yêu thích"}
           </button>
         </div>
+        <button class="btn-outline" style="width:100%; margin-top:8px;" id="modal-pin-ai">
+          Phối bộ với sản phẩm này bằng AI Stylist →
+        </button>
       </div>
     </div>
   `;
@@ -1360,13 +967,86 @@ function openProductModal(productId) {
     openProductModal(p.id);
   });
 
+  document.getElementById("modal-wish-btn")?.addEventListener("click", () => {
+    toggleWishlist(p.id);
+    openProductModal(p.id);
+  });
+
   document.getElementById("modal-pin-ai")?.addEventListener("click", () => {
     modal.hidden = true;
     state.aiConfig.anchorId = p.id;
     state.aiConfig.style = p.style;
     navigateTo("ai-stylist");
-    showToast(`Đã ghim "${p.name}" vào AI Styling Assistant!`);
+    showToast(`Đã chọn "${p.name}" làm món phối chính.`);
   });
+}
+
+function openPolicyModal(key) {
+  const doc = POLICY_DOCS[key];
+  if (!doc) return;
+  const modal = document.getElementById("info-modal");
+  const body = document.getElementById("info-modal-body");
+  body.innerHTML = `
+    <h2 id="info-modal-title" style="margin:0 0 14px; font-size:20px;">${escapeHtml(doc.title)}</h2>
+    <div style="display:grid; gap:10px; font-size:13.5px; color:var(--ink-muted);">
+      ${doc.items.map((line) => `<p style="margin:0; padding:10px 12px; background:var(--bg-subtle); border-radius:4px;">${escapeHtml(line)}</p>`).join("")}
+    </div>
+  `;
+  modal.hidden = false;
+}
+
+function renderWishlistDrawer() {
+  const badge = document.getElementById("wishlist-count");
+  if (badge) badge.textContent = String(state.wishlist.length);
+
+  const container = document.getElementById("wishlist-items-container");
+  if (!container) return;
+
+  const items = state.wishlist.map((id) => PRODUCTS.find((p) => p.id === id)).filter(Boolean);
+  if (!items.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <p>Bạn chưa lưu sản phẩm yêu thích nào.</p>
+        <button class="btn-primary btn-sm" id="wish-browse-btn">Xem sản phẩm</button>
+      </div>
+    `;
+    document.getElementById("wish-browse-btn")?.addEventListener("click", () => {
+      closeWishlistDrawer();
+      navigateTo("market");
+    });
+    return;
+  }
+
+  container.innerHTML = items
+    .map(
+      (p) => `
+    <div class="cart-item-row">
+      <div class="cart-thumb"><img src="${escapeHtml(p.image)}" alt="${escapeHtml(p.name)}" /></div>
+      <div>
+        <div style="font-size:13px; font-weight:600; line-height:1.3">${escapeHtml(p.name)}</div>
+        <div class="muted-xs">${escapeHtml(p.brand)} • Size ${escapeHtml(p.size.split(" ")[0])}</div>
+        <div class="tabular" style="font-size:13.5px; font-weight:700; margin-top:4px">${formatVND(p.price)}</div>
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button class="btn-primary btn-sm" style="padding:5px 10px; font-size:11.5px;" data-wish-to-cart="${p.id}">+ Vào giỏ</button>
+          <button class="btn-outline-sm" style="padding:5px 9px; font-size:11.5px;" data-wish-remove="${p.id}">Xóa</button>
+        </div>
+      </div>
+    </div>
+  `
+    )
+    .join("");
+
+  container.querySelectorAll("[data-wish-to-cart]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      addToCart(btn.getAttribute("data-wish-to-cart"));
+      renderWishlistDrawer();
+    })
+  );
+  container.querySelectorAll("[data-wish-remove]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      toggleWishlist(btn.getAttribute("data-wish-remove"));
+    })
+  );
 }
 
 function renderCartDrawer() {
@@ -1379,16 +1059,16 @@ function renderCartDrawer() {
 
   if (state.checkoutDoneOrder) {
     container.innerHTML = `
-      <div class="panel-card" style="background:var(--forest-soft); border-color:#9ecbb6;">
-        <div class="mono-text" style="font-size:11px; font-weight:700; color:var(--forest)">ĐẶT HÀNG THÀNH CÔNG • ESCROW BẢO VỆ</div>
+      <div class="panel-card" style="background:var(--eco-bg); border-color:var(--eco-border);">
+        <div style="font-size:11px; font-weight:700; color:var(--eco);">ĐẶT HÀNG THÀNH CÔNG • ĐƯỢC BẢO VỆ ESCROW</div>
         <h3 style="margin:6px 0">Mã đơn: ${escapeHtml(state.checkoutDoneOrder.id)}</h3>
         <p style="font-size:13.5px; margin:6px 0">
-          Phương thức: <strong>${escapeHtml(state.checkoutDoneOrder.method)}</strong><br/>
-          Tổng thanh toán: <strong class="mono-text">${formatVND(state.checkoutDoneOrder.total)}</strong><br/>
-          Điểm giao nhận: <strong>${escapeHtml(state.checkoutDoneOrder.station)}</strong>
+          Thanh toán: <strong>${escapeHtml(state.checkoutDoneOrder.method)}</strong><br/>
+          Tổng thanh toán: <strong class="tabular">${formatVND(state.checkoutDoneOrder.total)}</strong><br/>
+          Giao nhận: <strong>${escapeHtml(state.checkoutDoneOrder.station)}</strong>
         </p>
         <p class="muted-xs">
-          Tiền được giữ tại ví trung gian CFD Escrow và chỉ giải ngân cho người ký gửi sau khi bạn xác nhận đúng mô tả Studio.
+          Tiền được giữ tại ví trung gian CFD Escrow và chỉ chuyển cho người bán sau khi bạn kiểm tra hàng đúng mô tả.
         </p>
         <button class="btn-primary btn-sm" style="margin-top:12px" id="cart-new-shopping-btn">Tiếp tục mua sắm</button>
       </div>
@@ -1407,8 +1087,8 @@ function renderCartDrawer() {
   if (!cartItems.length) {
     container.innerHTML = `
       <div class="empty-state">
-        <p>Giỏ hàng tuần hoàn của bạn đang trống.</p>
-        <button class="btn-primary btn-sm" id="cart-browse-btn">Khám phá sàn ngay</button>
+        <p>Giỏ hàng của bạn đang trống.</p>
+        <button class="btn-primary btn-sm" id="cart-browse-btn">Mua sắm ngay</button>
       </div>
     `;
     footer.innerHTML = "";
@@ -1420,54 +1100,83 @@ function renderCartDrawer() {
   }
 
   const subtotal = cartItems.reduce((s, p) => s + p.price, 0);
+  const voucherApplied = state.voucherCode.trim().toUpperCase() === "CFDSV15";
+  const discount = voucherApplied ? Math.round(subtotal * 0.15) : 0;
+  const afterDiscount = subtotal - discount;
+  const shipFee = afterDiscount >= FREE_SHIP_THRESHOLD ? 0 : 20000;
+  const finalTotal = afterDiscount + shipFee;
+  const shipProgress = Math.min(100, Math.round((afterDiscount / FREE_SHIP_THRESHOLD) * 100));
   const origTotal = cartItems.reduce((s, p) => s + p.originalPrice, 0);
   const co2Total = cartItems.reduce((s, p) => s + p.co2SavedKg, 0);
 
-  container.innerHTML = cartItems
-    .map(
-      (p) => `
-    <div class="cart-item-row">
-      <div class="cart-thumb">${renderGarmentSVG(p)}</div>
-      <div>
-        <div style="font-size:13.5px; font-weight:700; line-height:1.3">${escapeHtml(p.name)}</div>
-        <div class="muted-xs">${p.id} • Size ${escapeHtml(p.size.split(" ")[0])}</div>
-        <div class="mono-text" style="font-size:13.5px; font-weight:700; color:var(--forest); margin-top:3px">
-          ${formatVND(p.price)}
-        </div>
-      </div>
-      <button class="btn-outline-sm" data-remove-cart="${p.id}" aria-label="Xóa khỏi giỏ">Xóa</button>
+  container.innerHTML = `
+    <div class="shipping-meter">
+      ${
+        shipFee === 0
+          ? `<strong style="color:var(--eco)">✓ Đơn hàng của bạn được Miễn phí vận chuyển!</strong>`
+          : `Mua thêm <strong class="tabular">${formatVND(FREE_SHIP_THRESHOLD - afterDiscount)}</strong> để được <strong>Freeship</strong>`
+      }
+      <div class="shipping-bar"><div class="shipping-fill" style="width:${shipProgress}%"></div></div>
     </div>
-  `
-    )
-    .join("");
+    ${cartItems
+      .map(
+        (p) => `
+      <div class="cart-item-row">
+        <div class="cart-thumb"><img src="${escapeHtml(p.image)}" alt="${escapeHtml(p.name)}" /></div>
+        <div>
+          <div style="font-size:13px; font-weight:600; line-height:1.3">${escapeHtml(p.name)}</div>
+          <div class="muted-xs">${escapeHtml(p.brand)} • Size ${escapeHtml(p.size.split(" ")[0])}</div>
+          <div class="tabular" style="font-size:13.5px; font-weight:700; margin-top:4px">${formatVND(p.price)}</div>
+        </div>
+        <button class="btn-outline-sm" data-remove-cart="${p.id}">Xóa</button>
+      </div>
+    `
+      )
+      .join("")}
+  `;
 
   footer.innerHTML = `
-    <div style="display:grid; gap:6px; font-size:13px; margin-bottom:12px;">
+    <div class="voucher-row">
+      <input type="text" id="voucher-input" placeholder="Nhập mã giảm giá (VD: CFDSV15)" value="${escapeHtml(state.voucherCode)}" />
+      <button class="btn-outline-sm" id="apply-voucher-btn">Áp dụng</button>
+    </div>
+
+    <div style="display:grid; gap:5px; font-size:12.5px; margin-bottom:12px;" class="tabular">
       <div style="display:flex; justify-content:space-between">
         <span>Tiết kiệm so với mua mới:</span>
-        <strong class="mono-text" style="color:var(--terracotta)">-${formatVND(origTotal - subtotal)}</strong>
+        <strong style="color:var(--sale)">-${formatVND(origTotal - afterDiscount)}</strong>
+      </div>
+      ${
+        voucherApplied
+          ? `<div style="display:flex; justify-content:space-between"><span>Mã CFDSV15 (-15%):</span><strong style="color:var(--eco)">-${formatVND(discount)}</strong></div>`
+          : ""
+      }
+      <div style="display:flex; justify-content:space-between">
+        <span>Phí giao hàng:</span>
+        <strong>${shipFee === 0 ? "Miễn phí" : formatVND(shipFee)}</strong>
       </div>
       <div style="display:flex; justify-content:space-between">
-        <span>Tác động xanh đơn hàng:</span>
-        <strong class="mono-text" style="color:var(--forest)">-${co2Total.toFixed(1)} kg CO₂</strong>
+        <span>Giảm phát thải CO₂:</span>
+        <strong style="color:var(--eco)">-${co2Total.toFixed(1)} kg CO₂</strong>
       </div>
-      <div style="display:flex; justify-content:space-between; font-size:16px; padding-top:6px; border-top:1px solid var(--border)">
-        <strong>Tổng cộng (Free ship Làng ĐH):</strong>
-        <strong class="mono-text" style="color:var(--forest)">${formatVND(subtotal)}</strong>
+      <div style="display:flex; justify-content:space-between; font-size:15.5px; padding-top:6px; border-top:1px solid var(--border)">
+        <strong>Tổng thanh toán:</strong>
+        <strong>${formatVND(finalTotal)}</strong>
       </div>
     </div>
 
     <div class="field-group" style="margin-bottom:10px;">
-      <label for="checkout-method" style="font-size:12px;">Cổng thanh toán trung gian (Escrow)</label>
-      <select id="checkout-method" class="input-control" style="padding:8px 10px; font-size:12.5px;">
-        <option value="Ví MoMo (Escrow CFD)">Ví MoMo — Thanh toán trung gian</option>
-        <option value="ZaloPay (Escrow CFD)">ZaloPay — Thanh toán trung gian</option>
-        <option value="Nhận hàng tại Trạm KTX ĐHQG (0đ Ship)">Nhận &amp; kiểm tra tại Trạm KTX ĐHQG</option>
+      <label for="checkout-method" style="font-size:12px;">Phương thức thanh toán (Escrow)</label>
+      <select id="checkout-method" class="input-control" style="height:36px; font-size:12.5px;">
+        <option value="Ví MoMo (Escrow CFD)">Ví MoMo — Bảo vệ người mua</option>
+        <option value="ZaloPay (Escrow CFD)">ZaloPay — Bảo vệ người mua</option>
+        <option value="Nhận tại Trạm KTX ĐHQG (0đ Ship)">Nhận &amp; kiểm tra tại Trạm KTX ĐHQG</option>
+        <option value="COD — Thanh toán khi nhận hàng">COD — Thanh toán khi nhận hàng</option>
       </select>
     </div>
 
     <button class="btn-primary" style="width:100%" id="checkout-confirm-btn">
-      Xác nhận Đặt Hàng Mô Phỏng (${formatVND(subtotal)})
+      Thanh toán đơn hàng (${formatVND(finalTotal)})
     </button>
   `;
 
@@ -1477,36 +1186,63 @@ function renderCartDrawer() {
       state.cart = state.cart.filter((x) => x !== id);
       saveState();
       renderCartDrawer();
-      renderActiveView();
+      if (state.activeView === "market") refreshCatalogGrid();
     });
   });
 
+  document.getElementById("apply-voucher-btn")?.addEventListener("click", () => {
+    const val = document.getElementById("voucher-input")?.value || "";
+    state.voucherCode = val.trim();
+    saveState();
+    renderCartDrawer();
+    if (state.voucherCode.toUpperCase() === "CFDSV15") {
+      showToast("Đã áp dụng mã CFDSV15 giảm 15%!");
+    } else if (state.voucherCode) {
+      showToast("Mã không hợp lệ. Thử mã CFDSV15 để được giảm 15%.");
+    }
+  });
+
   document.getElementById("checkout-confirm-btn")?.addEventListener("click", () => {
-    const methodEl = document.getElementById("checkout-method");
-    const method = methodEl ? methodEl.value : "Ví MoMo (Escrow CFD)";
+    const method = document.getElementById("checkout-method")?.value || "Ví MoMo (Escrow CFD)";
     state.checkoutDoneOrder = {
       id: `CFD-ORD-${Math.floor(1000 + Math.random() * 9000)}`,
       method,
-      total: subtotal,
-      station: method.includes("KTX") ? "Trạm KTX ĐHQG-HCM" : "Giao xanh nội khu Thủ Đức / TP.HCM"
+      total: finalTotal,
+      station: method.includes("KTX") ? "Trạm KTX ĐHQG-HCM" : "Giao hàng nội thành TP.HCM / Thủ Đức"
     };
     state.cart = [];
     saveState();
     renderCartDrawer();
-    renderActiveView();
-    showToast("Đơn hàng mô phỏng đã được ghi nhận qua CFD Escrow!");
+    if (state.activeView === "market") refreshCatalogGrid();
+    showToast("Đặt hàng thành công!");
   });
 }
+
+/* ==================== CART & WISHLIST HELPERS ==================== */
 
 function addToCart(productId) {
   if (!state.cart.includes(productId)) {
     state.cart.push(productId);
     saveState();
     renderCartDrawer();
-    showToast("Đã thêm sản phẩm vào giỏ hàng tuần hoàn.");
+    if (state.activeView === "market") refreshCatalogGrid();
+    showToast("Đã thêm sản phẩm vào giỏ hàng.");
   } else {
-    showToast("Sản phẩm này đã nằm trong giỏ hàng (mẫu độc bản số lượng 1).");
+    showToast("Sản phẩm đã có trong giỏ hàng (mỗi mẫu chỉ có 1 chiếc).");
   }
+}
+
+function toggleWishlist(productId) {
+  if (state.wishlist.includes(productId)) {
+    state.wishlist = state.wishlist.filter((id) => id !== productId);
+    showToast("Đã bỏ khỏi danh sách yêu thích.");
+  } else {
+    state.wishlist.push(productId);
+    showToast("Đã lưu vào danh sách yêu thích.");
+  }
+  saveState();
+  renderWishlistDrawer();
+  if (state.activeView === "market") refreshCatalogGrid();
 }
 
 function openCartDrawer() {
@@ -1518,10 +1254,19 @@ function closeCartDrawer() {
   document.getElementById("cart-drawer").hidden = true;
 }
 
+function openWishlistDrawer() {
+  renderWishlistDrawer();
+  document.getElementById("wishlist-drawer").hidden = false;
+}
+
+function closeWishlistDrawer() {
+  document.getElementById("wishlist-drawer").hidden = true;
+}
+
 /* ==================== ROUTING & EVENT BINDING ==================== */
 
-function navigateTo(view) {
-  const valid = ["market", "ai-stylist", "sell", "ecosystem", "pitch"];
+function navigateTo(view, scrollTargetId = null) {
+  const valid = ["market", "ai-stylist", "sell"];
   state.activeView = valid.includes(view) ? view : "market";
   window.location.hash = state.activeView;
 
@@ -1532,11 +1277,16 @@ function navigateTo(view) {
     }
   });
 
-  const mobilePanel = document.getElementById("mobile-nav-panel");
-  if (mobilePanel) mobilePanel.classList.remove("open");
-
+  document.getElementById("mobile-nav-panel")?.classList.remove("open");
   renderActiveView();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+
+  if (scrollTargetId) {
+    setTimeout(() => {
+      document.getElementById(scrollTargetId)?.scrollIntoView({ behavior: "smooth" });
+    }, 40);
+  } else {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
 function renderActiveView() {
@@ -1549,18 +1299,30 @@ function renderActiveView() {
   } else if (state.activeView === "ai-stylist") {
     root.innerHTML = renderAIStylistView();
     bindAIStylistEvents();
-  } else if (state.activeView === "sell") {
+  } else {
     root.innerHTML = renderSellView();
     bindSellEvents();
-  } else if (state.activeView === "ecosystem") {
-    root.innerHTML = renderEcosystemView();
-    bindEcosystemEvents();
-  } else {
-    root.innerHTML = renderPitchView();
-    bindPitchEvents();
   }
 
   bindSharedProductTriggers();
+}
+
+function refreshCatalogGrid() {
+  const products = getFilteredProducts();
+  const grid = document.getElementById("market-product-grid");
+  const countEl = document.getElementById("market-count-label");
+  if (grid) grid.innerHTML = renderProductCardsHTML(products);
+  if (countEl) countEl.innerHTML = `Hiển thị <strong>${products.length}</strong> / ${PRODUCTS.length} sản phẩm`;
+
+  document.getElementById("reset-filters-empty-btn")?.addEventListener("click", resetAllFilters);
+  bindSharedProductTriggers();
+}
+
+function resetAllFilters() {
+  state.filters = { search: "", tier: "all", category: "all", style: "all", priceRange: "all", sort: "featured" };
+  const hInput = document.getElementById("header-search-input");
+  if (hInput) hInput.value = "";
+  renderActiveView();
 }
 
 function bindSharedProductTriggers() {
@@ -1571,7 +1333,12 @@ function bindSharedProductTriggers() {
     el.addEventListener("click", (e) => {
       e.stopPropagation();
       addToCart(el.getAttribute("data-add-cart"));
-      renderActiveView();
+    });
+  });
+  document.querySelectorAll("[data-toggle-wish]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleWishlist(el.getAttribute("data-toggle-wish"));
     });
   });
   document.querySelectorAll("#app-root [data-nav]").forEach((el) => {
@@ -1580,28 +1347,29 @@ function bindSharedProductTriggers() {
 }
 
 function bindMarketplaceEvents() {
-  document.getElementById("scroll-to-catalog-btn")?.addEventListener("click", () => {
+  document.getElementById("hero-shop-btn")?.addEventListener("click", () => {
     document.getElementById("catalog-anchor")?.scrollIntoView({ behavior: "smooth" });
   });
 
-  const searchInput = document.getElementById("market-search-input");
-  searchInput?.addEventListener("input", (e) => {
-    state.filters.search = e.target.value;
-    const products = getFilteredProducts();
-    const grid = document.getElementById("market-product-grid");
-    const countEl = document.getElementById("market-count-label");
-    if (grid) grid.innerHTML = renderProductCardsHTML(products);
-    if (countEl) countEl.innerHTML = `Hiển thị <strong>${products.length}</strong> / ${PRODUCTS.length} sản phẩm`;
-    document.getElementById("reset-filters-btn")?.addEventListener("click", () => {
-      state.filters = { search: "", tier: "all", category: "all", style: "all", priceRange: "all", sort: "featured" };
+  document.querySelectorAll("[data-cat-jump]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      state.filters.category = btn.getAttribute("data-cat-jump");
       renderActiveView();
-    });
-    bindSharedProductTriggers();
+      document.getElementById("catalog-anchor")?.scrollIntoView({ behavior: "smooth" });
+    })
+  );
+
+  const inlineSearch = document.getElementById("catalog-search-input");
+  inlineSearch?.addEventListener("input", (e) => {
+    state.filters.search = e.target.value;
+    const hInput = document.getElementById("header-search-input");
+    if (hInput && hInput.value !== state.filters.search) hInput.value = state.filters.search;
+    refreshCatalogGrid();
   });
 
   document.getElementById("market-sort-select")?.addEventListener("change", (e) => {
     state.filters.sort = e.target.value;
-    renderActiveView();
+    refreshCatalogGrid();
   });
 
   document.querySelectorAll("[data-filter-tier]").forEach((btn) =>
@@ -1629,10 +1397,8 @@ function bindMarketplaceEvents() {
     })
   );
 
-  document.getElementById("reset-filters-btn")?.addEventListener("click", () => {
-    state.filters = { search: "", tier: "all", category: "all", style: "all", priceRange: "all", sort: "featured" };
-    renderActiveView();
-  });
+  document.getElementById("reset-filters-btn")?.addEventListener("click", resetAllFilters);
+  document.getElementById("reset-filters-empty-btn")?.addEventListener("click", resetAllFilters);
 }
 
 function bindAIOutfitActions() {
@@ -1649,7 +1415,7 @@ function bindAIOutfitActions() {
       saveState();
       renderCartDrawer();
       openCartDrawer();
-      showToast(added ? `Đã thêm ${added} món từ set AI vào giỏ hàng!` : "Cả bộ đồ đã có sẵn trong giỏ hàng.");
+      showToast(added ? `Đã thêm ${added} món từ set phối vào giỏ hàng!` : "Cả bộ đồ đã có sẵn trong giỏ.");
     })
   );
 }
@@ -1692,9 +1458,8 @@ function bindAIStylistEvents() {
   });
 
   document.getElementById("run-ai-match-btn")?.addEventListener("click", () => {
-    state.aiScanTick += 1;
     renderActiveView();
-    showToast("AI Matching hoàn tất: Đã tối ưu hóa phối đồ không định kiến!");
+    showToast("Đã cập nhật gợi ý phối đồ phù hợp nhất!");
   });
 
   bindAIOutfitActions();
@@ -1756,7 +1521,7 @@ function bindSellEvents() {
         : "Ký gửi 60 ngày (Đối soát ngày 15 & 30)";
     const valueLabel =
       evalRes.groupCode === "C"
-        ? "0đ • Cộng điểm Tín Chỉ Xanh"
+        ? "0đ • Tích điểm Xanh"
         : sf.payoutMode === "direct"
         ? `${formatVND(evalRes.directPrice)} (Thanh toán ngay)`
         : `Niêm yết ${formatVND(evalRes.consignListPrice)} (Nhận ~${formatVND(evalRes.sellerNet)})`;
@@ -1765,69 +1530,18 @@ function bindSellEvents() {
       id: `CFD-IN-2026-${Math.floor(200 + Math.random() * 799)}`,
       itemName: sf.itemName.trim(),
       category: sf.category,
-      group: evalRes.groupLabel.split("•")[0].trim(),
+      group: evalRes.groupLabel.split("(")[0].trim(),
       mode: modeLabel,
       estimatedValue: valueLabel,
       station: station.name,
       stageIndex: 0,
-      createdAt: "Hôm nay (24/11/2026)"
+      createdAt: "Hôm nay"
     };
 
     state.submissions = [newEntry, ...state.submissions];
     saveState();
     renderActiveView();
-    showToast(`Đã tạo phiếu ${newEntry.id}! Hãy mang đồ tới ${station.name.split("—")[0].trim()}.`);
-  });
-}
-
-function bindEcosystemEvents() {
-  document.querySelectorAll("[data-zone-btn], .floor-zone").forEach((el) =>
-    el.addEventListener("click", () => {
-      const zId = Number(el.getAttribute("data-zone-btn") || el.getAttribute("data-zone"));
-      state.activeZone = zId;
-      renderActiveView();
-    })
-  );
-
-  document.getElementById("eco-slider")?.addEventListener("input", (e) => {
-    state.ecoItemsPerSemester = Number(e.target.value);
-    const lbl = document.getElementById("eco-count-label");
-    const grid = document.getElementById("eco-impact-grid");
-    if (lbl) lbl.textContent = `${state.ecoItemsPerSemester} món`;
-    if (grid) grid.innerHTML = renderEcoMetricsHTML(state.ecoItemsPerSemester);
-  });
-}
-
-function updateFinancePanel() {
-  const { users, arpu } = state.financeSim;
-  const uLbl = document.getElementById("fin-users-label");
-  const aLbl = document.getElementById("fin-arpu-label");
-  const sum = document.getElementById("fin-metrics-summary");
-  const chart = document.getElementById("fin-chart-box");
-  if (uLbl) uLbl.textContent = `${users.toLocaleString("vi-VN")} người`;
-  if (aLbl) aLbl.textContent = formatVND(arpu);
-  if (sum) sum.innerHTML = renderFinanceMetricsHTML(users, arpu);
-  if (chart) chart.innerHTML = renderBreakEvenChartSVG(users, arpu);
-}
-
-function bindPitchEvents() {
-  document.querySelectorAll("[data-fin-preset]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      const [u, a] = btn.getAttribute("data-fin-preset").split(",").map(Number);
-      state.financeSim.users = u;
-      state.financeSim.arpu = a;
-      renderActiveView();
-    })
-  );
-
-  document.getElementById("fin-users-slider")?.addEventListener("input", (e) => {
-    state.financeSim.users = Number(e.target.value);
-    updateFinancePanel();
-  });
-
-  document.getElementById("fin-arpu-slider")?.addEventListener("input", (e) => {
-    state.financeSim.arpu = Number(e.target.value);
-    updateFinancePanel();
+    showToast(`Đã tạo phiếu ${newEntry.id}. Mang đồ tới trạm để kiểm định nhanh!`);
   });
 }
 
@@ -1836,16 +1550,44 @@ function bindPitchEvents() {
 function init() {
   loadState();
 
-  const logoHeader = document.getElementById("brand-logo-slot");
-  const logoFooter = document.getElementById("footer-logo-slot");
-  if (logoHeader) logoHeader.innerHTML = renderBrandLogoSVG(28);
-  if (logoFooter) logoFooter.innerHTML = renderBrandLogoSVG(28);
-
   document.querySelectorAll("[data-nav]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       navigateTo(btn.getAttribute("data-nav"));
     });
+  });
+
+  document.querySelectorAll("[data-footer-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = btn.getAttribute("data-footer-filter");
+      state.filters.category = "all";
+      state.filters.tier = mode === "tierA" ? "A" : mode === "tierB" ? "B" : "all";
+      navigateTo("market", "catalog-anchor");
+    });
+  });
+
+  document.querySelectorAll("[data-policy]").forEach((btn) => {
+    btn.addEventListener("click", () => openPolicyModal(btn.getAttribute("data-policy")));
+  });
+
+  document.getElementById("header-search-input")?.addEventListener("input", (e) => {
+    state.filters.search = e.target.value;
+    if (state.activeView !== "market") {
+      navigateTo("market", "catalog-anchor");
+    } else {
+      const inline = document.getElementById("catalog-search-input");
+      if (inline && inline.value !== state.filters.search) inline.value = state.filters.search;
+      refreshCatalogGrid();
+    }
+  });
+
+  document.getElementById("newsletter-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const emailInput = document.getElementById("newsletter-email");
+    if (emailInput && emailInput.value.trim()) {
+      emailInput.value = "";
+      showToast("Đăng ký thành công! Sử dụng mã CFDSV15 để giảm 15% cho đơn đầu.");
+    }
   });
 
   document.getElementById("mobile-menu-btn")?.addEventListener("click", () => {
@@ -1858,6 +1600,12 @@ function init() {
     if (e.target.id === "cart-drawer") closeCartDrawer();
   });
 
+  document.getElementById("wishlist-open-btn")?.addEventListener("click", openWishlistDrawer);
+  document.getElementById("wishlist-close-btn")?.addEventListener("click", closeWishlistDrawer);
+  document.getElementById("wishlist-drawer")?.addEventListener("click", (e) => {
+    if (e.target.id === "wishlist-drawer") closeWishlistDrawer();
+  });
+
   const prodModal = document.getElementById("product-modal");
   document.getElementById("product-modal-close")?.addEventListener("click", () => {
     prodModal.hidden = true;
@@ -1866,10 +1614,20 @@ function init() {
     if (e.target.id === "product-modal") prodModal.hidden = true;
   });
 
+  const infoModal = document.getElementById("info-modal");
+  document.getElementById("info-modal-close")?.addEventListener("click", () => {
+    infoModal.hidden = true;
+  });
+  infoModal?.addEventListener("click", (e) => {
+    if (e.target.id === "info-modal") infoModal.hidden = true;
+  });
+
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       if (prodModal) prodModal.hidden = true;
+      if (infoModal) infoModal.hidden = true;
       closeCartDrawer();
+      closeWishlistDrawer();
     }
   });
 
@@ -1882,6 +1640,7 @@ function init() {
 
   const initialHash = window.location.hash.replace("#", "");
   renderCartDrawer();
+  renderWishlistDrawer();
   navigateTo(initialHash || "market");
 }
 
