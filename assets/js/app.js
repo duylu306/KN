@@ -1837,13 +1837,9 @@ function renderChatModalBody() {
           <span class="user-avatar-xs logged">${escapeHtml(peer.initials)}</span>
           <div style="min-width:0;">
             <div style="font-weight:700; font-size:14px;">${escapeHtml(peer.name)}</div>
-            <div class="muted-xs">${livePeer ? "🟢 Đang online ở tab khác" : escapeHtml(peer.responseTime)}</div>
+            <div class="muted-xs">${livePeer ? "🟢 Đang online" : escapeHtml(peer.responseTime)}</div>
           </div>
         </div>
-        <label style="font-size:11.5px; color:var(--ink-muted); display:flex; align-items:center; gap:5px; cursor:pointer;">
-          <input type="checkbox" id="chat-autoreply-toggle" ${state.autoReplyEnabled ? "checked" : ""} />
-          <span>Shop tự trả lời (khi test 1 tab)</span>
-        </label>
       </div>
 
       ${
