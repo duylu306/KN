@@ -1,11 +1,4 @@
-# CFD — Circular Fashion Digital (PoC Demo Website)
 
-**Đề tài Khởi nghiệp (IM1021) — Phát triển hệ sinh thái thời trang tuần hoàn dựa trên dữ liệu và công nghệ AI**
-
-- **Trường:** Đại học Bách khoa – ĐHQG TP.HCM (HCMUT)
-- **Lớp:** L04 – HK 252 • **Nhóm:** 02
-- **Giảng viên hướng dẫn:** Thầy Nguyễn Hữu Sơn
-- **Đại diện nhóm:** Đỗ Nguyễn Uyên Phương (`0913074196` • `circularfashiondigital@hcmut.edu.vn`)
 
 ## Các phân hệ trong bản PoC Demo
 
