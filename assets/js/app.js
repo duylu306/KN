@@ -1051,7 +1051,7 @@ function renderSellView() {
                     <img id="c2c-preview-img" class="upload-preview-img" src="${escapeHtml(c2c.image)}" alt="Xem trước ảnh sản phẩm" />
                     <div>
                       <input type="file" id="c2c-file-input" accept="image/*" style="font-size:12.5px; max-width:100%;" />
-                      <div class="muted-xs">Ảnh tải lên sẽ tự động nén nhẹ để hiển thị ngay trên Cửa hàng và đồng bộ giữa các tab.</div>
+                      <div class="muted-xs">Hỗ trợ JPG/PNG — ảnh sẽ tự động tối ưu kích thước khi đăng bài.</div>
                     </div>
                   </div>
                   <div class="muted-xs">Hoặc chọn nhanh ảnh mẫu sẵn có:</div>
@@ -1134,7 +1134,7 @@ function renderSellView() {
                 <span class="header-badge">${myListings.length}</span>
               </div>
               <p class="muted-xs" style="margin-bottom:14px;">
-                Mẹo demo 2 ô chat: Mở thêm 1 tab trình duyệt khác, đăng nhập tài khoản <strong>Nhật Cường</strong> ở tab kia, bấm vào sản phẩm bạn vừa đăng và chat thương lượng trực tiếp!
+                Quản lý các sản phẩm bạn đã đăng bán trực tiếp trên cửa hàng CFD.
               </p>
 
               ${
@@ -1352,27 +1352,14 @@ function openAuthModal(defaultTab = "login") {
       <form id="login-form">
         <div class="field-group">
           <label for="login-ident">Email hoặc Số điện thoại</label>
-          <input id="login-ident" class="input-control" type="text" placeholder="cuong@cfd.vn hoặc 0901234567" required />
+          <input id="login-ident" class="input-control" type="text" placeholder="Nhập email hoặc số điện thoại" required />
         </div>
         <div class="field-group">
           <label for="login-pass">Mật khẩu</label>
-          <input id="login-pass" class="input-control" type="password" placeholder="••••••" value="123456" required />
+          <input id="login-pass" class="input-control" type="password" placeholder="Nhập mật khẩu" required />
         </div>
         <button type="submit" class="btn-primary" style="width:100%">Đăng nhập</button>
       </form>
-
-      <div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--border);">
-        <div style="font-size:12px; font-weight:700; color:var(--ink-muted);">Đăng nhập nhanh (Mở 2 tab để chat Người mua ↔ Người bán):</div>
-        <div class="quick-login-grid">
-          ${DEMO_ACCOUNTS.map(
-            (acc) => `
-            <button type="button" class="quick-acc-card" data-quick-login="${acc.id}">
-              <div style="font-weight:700; font-size:13px;">${escapeHtml(acc.name)}</div>
-              <div class="muted-xs">${escapeHtml(acc.roleLabel)} • ${escapeHtml(acc.email)}</div>
-            </button>`
-          ).join("")}
-        </div>
-      </div>
     `
         : `
       <h2 id="auth-modal-title" style="margin:0 0 6px; font-size:20px;">Tạo tài khoản mua sắm mới</h2>
@@ -1407,17 +1394,6 @@ function openAuthModal(defaultTab = "login") {
     btn.addEventListener("click", () => openAuthModal(btn.getAttribute("data-auth-tab")))
   );
 
-  body.querySelectorAll("[data-quick-login]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      const uid = btn.getAttribute("data-quick-login");
-      setTabUser(uid);
-      modal.hidden = true;
-      renderActiveView();
-      const user = getCurrentUser();
-      showToast(`Đã đăng nhập: ${user?.name}`);
-    })
-  );
-
   document.getElementById("login-form")?.addEventListener("submit", (e) => {
     e.preventDefault();
     const ident = (document.getElementById("login-ident")?.value || "").trim().toLowerCase();
@@ -1426,7 +1402,7 @@ function openAuthModal(defaultTab = "login") {
       (u) => (u.email.toLowerCase() === ident || u.phone === ident) && u.password === pass
     );
     if (!found) {
-      showToast("Sai email/SĐT hoặc mật khẩu (mật khẩu tài khoản mẫu: 123456).");
+      showToast("Sai email/SĐT hoặc mật khẩu. Vui lòng kiểm tra lại.");
       return;
     }
     setTabUser(found.id);
@@ -1965,9 +1941,6 @@ function renderChatModalBody() {
     renderChatModalBody();
   });
 
-  document.getElementById("chat-autoreply-toggle")?.addEventListener("change", (e) => {
-    state.autoReplyEnabled = e.target.checked;
-  });
 
   document.getElementById("chat-buy-now-btn")?.addEventListener("click", () => {
     if (!activeConv) return;
